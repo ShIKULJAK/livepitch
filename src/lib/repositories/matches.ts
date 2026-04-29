@@ -1,0 +1,395 @@
+import { MatchStatus, Prisma } from "@prisma/client";
+import { prisma } from "@/lib/db/prisma";
+import type { z } from "zod";
+import { calculatePossessionPercentages } from "@/lib/constants/match";
+import { notifyFavoriteMatchFinished, notifyFavoriteMatchGoal } from "@/lib/notifications";
+import { matchDetailsUpdateSchema } from "@/lib/validation/match-details";
+import { matchInputSchema, matchUpdateSchema } from "@/lib/validation/match";
+
+type MatchInput = z.infer<typeof matchInputSchema>;
+type MatchUpdate = z.infer<typeof matchUpdateSchema>;
+type MatchDetailsUpdate = z.infer<typeof matchDetailsUpdateSchema>;
+
+async function assertCompetitionOwnership(organizationId: string, competitionId: string) {
+  return prisma.competition.findFirst({
+    where: { id: competitionId, organizationId },
+    select: { id: true, matchDurationMinutes: true },
+  });
+}
+
+const FRIENDLY_COMPETITION_OPTION = "__friendly_game__";
+
+async function resolveCompetitionForCreate(organizationId: string, competitionId: string, homeTeamId: string) {
+  if (competitionId !== FRIENDLY_COMPETITION_OPTION) {
+    const competition = await assertCompetitionOwnership(organizationId, competitionId);
+    if (!competition) throw new Error("Forbidden");
+    return competition;
+  }
+
+  const homeTeam = await prisma.team.findFirst({
+    where: { id: homeTeamId, organizationId },
+    select: { sport: true },
+  });
+  if (!homeTeam) throw new Error("Home team not found");
+
+  const existingFriendlyCompetition = await prisma.competition.findFirst({
+    where: {
+      organizationId,
+      type: "FRIENDLY_MATCH",
+      sport: homeTeam.sport,
+      name: "Friendly Game",
+    },
+    select: { id: true, matchDurationMinutes: true },
+  });
+
+  if (existingFriendlyCompetition) return existingFriendlyCompetition;
+
+  return prisma.competition.create({
+    data: {
+      organizationId,
+      type: "FRIENDLY_MATCH",
+      sport: homeTeam.sport,
+      name: "Friendly Game",
+      format: "Single Match",
+      status: "ONGOING",
+      matchDurationMinutes: 90,
+      visibility: "public",
+    },
+    select: { id: true, matchDurationMinutes: true },
+  });
+}
+
+export async function createMatch(organizationId: string, input: MatchInput) {
+  const competition = await resolveCompetitionForCreate(organizationId, input.competitionId, input.homeTeamId);
+
+  return prisma.match.create({
+    data: {
+      competitionId: competition.id,
+      homeTeamId: input.homeTeamId,
+      awayTeamId: input.awayTeamId,
+      venueId: input.venueId ?? null,
+      round: input.round ?? null,
+      scheduledAt: new Date(input.scheduledAt),
+      status: input.status ?? "SCHEDULED",
+      homeScore: input.homeScore ?? null,
+      awayScore: input.awayScore ?? null,
+      liveMinute: input.liveMinute ?? null,
+      regularTimeMinutes: competition.matchDurationMinutes,
+    },
+  });
+}
+
+export async function updateMatch(organizationId: string, matchId: string, input: MatchUpdate) {
+  const existing = await prisma.match.findFirst({
+    where: { id: matchId, competition: { organizationId } },
+    select: { id: true, status: true },
+  });
+
+  if (!existing) return null;
+
+  const updated = await prisma.match.update({
+    where: { id: existing.id },
+    data: {
+      ...(input.competitionId !== undefined ? { competitionId: input.competitionId } : {}),
+      ...(input.homeTeamId !== undefined ? { homeTeamId: input.homeTeamId } : {}),
+      ...(input.awayTeamId !== undefined ? { awayTeamId: input.awayTeamId } : {}),
+      ...(input.venueId !== undefined ? { venueId: input.venueId } : {}),
+      ...(input.round !== undefined ? { round: input.round } : {}),
+      ...(input.scheduledAt !== undefined ? { scheduledAt: new Date(input.scheduledAt) } : {}),
+      ...(input.status !== undefined ? { status: input.status } : {}),
+      ...(input.homeScore !== undefined ? { homeScore: input.homeScore } : {}),
+      ...(input.awayScore !== undefined ? { awayScore: input.awayScore } : {}),
+      ...(input.liveMinute !== undefined ? { liveMinute: input.liveMinute } : {}),
+      ...(input.regularTimeMinutes !== undefined ? { regularTimeMinutes: input.regularTimeMinutes } : {}),
+    },
+  });
+
+  if (existing.status !== "FINISHED" && updated.status === "FINISHED") {
+    const withTeams = await prisma.match.findUnique({
+      where: { id: updated.id },
+      include: {
+        homeTeam: { select: { name: true } },
+        awayTeam: { select: { name: true } },
+      },
+    });
+    if (withTeams) {
+      await notifyFavoriteMatchFinished({
+        matchId: withTeams.id,
+        homeTeam: withTeams.homeTeam.name,
+        awayTeam: withTeams.awayTeam.name,
+        homeScore: withTeams.homeScore,
+        awayScore: withTeams.awayScore,
+      });
+    }
+  }
+
+  return updated;
+}
+
+export async function deleteMatch(organizationId: string, matchId: string) {
+  const existing = await prisma.match.findFirst({
+    where: { id: matchId, competition: { organizationId } },
+    select: { id: true },
+  });
+
+  if (!existing) return null;
+  return prisma.match.delete({ where: { id: existing.id } });
+}
+
+export async function listMatchesForExport(
+  organizationId: string,
+  filters: {
+    status?: MatchStatus;
+    competitionId?: string;
+  }
+) {
+  const where: Prisma.MatchWhereInput = {
+    competition: { organizationId },
+    ...(filters.status ? { status: filters.status } : {}),
+    ...(filters.competitionId ? { competitionId: filters.competitionId } : {}),
+  };
+
+  return prisma.match.findMany({
+    where,
+    include: {
+      competition: true,
+      venue: true,
+      homeTeam: true,
+      awayTeam: true,
+    },
+    orderBy: [{ scheduledAt: "asc" }],
+  });
+}
+
+export async function getMatchDetails(organizationId: string, matchId: string) {
+  return prisma.match.findFirst({
+    where: { id: matchId, competition: { organizationId } },
+    include: {
+      competition: true,
+      venue: true,
+      homeTeam: {
+        include: {
+          players: {
+            select: { id: true, fullName: true },
+            orderBy: { fullName: "asc" },
+          },
+        },
+      },
+      awayTeam: {
+        include: {
+          players: {
+            select: { id: true, fullName: true },
+            orderBy: { fullName: "asc" },
+          },
+        },
+      },
+      goalEvents: {
+        include: {
+          player: { select: { id: true, fullName: true } },
+          team: { select: { id: true, name: true } },
+        },
+        orderBy: [{ minuteBase: "asc" }, { minuteExtra: "asc" }, { createdAt: "asc" }],
+      },
+      teamStats: {
+        include: {
+          team: { select: { id: true, name: true } },
+        },
+      },
+    },
+  });
+}
+
+export async function saveMatchDetails(organizationId: string, matchId: string, payload: MatchDetailsUpdate) {
+  const match = await prisma.match.findFirst({
+    where: { id: matchId, competition: { organizationId } },
+    select: { id: true, homeTeamId: true, awayTeamId: true, status: true, regularTimeMinutes: true },
+  });
+
+  if (!match) return null;
+
+  const homeTeamStats = payload.teamStats.find((item) => item.teamId === match.homeTeamId);
+  const awayTeamStats = payload.teamStats.find((item) => item.teamId === match.awayTeamId);
+
+  if (!homeTeamStats || !awayTeamStats) {
+    throw new Error("Both team stats are required.");
+  }
+
+  const possession = calculatePossessionPercentages(homeTeamStats.possessionSeconds, awayTeamStats.possessionSeconds);
+
+  const existingGoals = await prisma.matchGoalEvent.findMany({
+    where: { matchId: match.id },
+    select: { teamId: true, scorerName: true, minuteBase: true, minuteExtra: true, goalType: true, player: { select: { fullName: true } } },
+  });
+  const existingGoalKeys = new Set(
+    existingGoals.map(
+      (goal) =>
+        `${goal.teamId}|${goal.player?.fullName ?? goal.scorerName ?? ""}|${goal.minuteBase}|${goal.minuteExtra ?? 0}|${goal.goalType}`
+    )
+  );
+
+  return prisma.$transaction(async (tx) => {
+    const updatedMatch = await tx.match.update({
+      where: { id: match.id },
+      data: {
+        homeScore: payload.homeScore,
+        awayScore: payload.awayScore,
+        status: match.status === "SCHEDULED" ? "FINISHED" : match.status,
+      },
+    });
+
+    await tx.matchGoalEvent.deleteMany({ where: { matchId: match.id } });
+    if (payload.goalEvents.length) {
+      await tx.matchGoalEvent.createMany({
+        data: payload.goalEvents.map((event) => ({
+          matchId: match.id,
+          teamId: event.teamId,
+          playerId: event.playerId ?? null,
+          scorerName: event.scorerName?.trim() || null,
+          minuteBase: event.minuteBase,
+          minuteExtra: event.minuteExtra ?? null,
+          goalType: event.goalType,
+        })),
+      });
+    }
+
+    await tx.matchTeamStats.upsert({
+      where: { matchId_teamId: { matchId: match.id, teamId: match.homeTeamId } },
+      update: {
+        possessionPercent: possession.home,
+        possessionSeconds: homeTeamStats.possessionSeconds,
+        totalShots: homeTeamStats.totalShots,
+        shotsOnTarget: homeTeamStats.shotsOnTarget,
+        shotsOffTarget: homeTeamStats.shotsOffTarget,
+        totalPasses: homeTeamStats.totalPasses,
+        accuratePasses: homeTeamStats.accuratePasses,
+        inaccuratePasses: homeTeamStats.inaccuratePasses,
+        corners: homeTeamStats.corners,
+        fouls: homeTeamStats.fouls,
+        yellowCards: homeTeamStats.yellowCards,
+        redCards: homeTeamStats.redCards,
+      },
+      create: {
+        matchId: match.id,
+        teamId: match.homeTeamId,
+        possessionPercent: possession.home,
+        possessionSeconds: homeTeamStats.possessionSeconds,
+        totalShots: homeTeamStats.totalShots,
+        shotsOnTarget: homeTeamStats.shotsOnTarget,
+        shotsOffTarget: homeTeamStats.shotsOffTarget,
+        totalPasses: homeTeamStats.totalPasses,
+        accuratePasses: homeTeamStats.accuratePasses,
+        inaccuratePasses: homeTeamStats.inaccuratePasses,
+        corners: homeTeamStats.corners,
+        fouls: homeTeamStats.fouls,
+        yellowCards: homeTeamStats.yellowCards,
+        redCards: homeTeamStats.redCards,
+      },
+    });
+
+    await tx.matchTeamStats.upsert({
+      where: { matchId_teamId: { matchId: match.id, teamId: match.awayTeamId } },
+      update: {
+        possessionPercent: possession.away,
+        possessionSeconds: awayTeamStats.possessionSeconds,
+        totalShots: awayTeamStats.totalShots,
+        shotsOnTarget: awayTeamStats.shotsOnTarget,
+        shotsOffTarget: awayTeamStats.shotsOffTarget,
+        totalPasses: awayTeamStats.totalPasses,
+        accuratePasses: awayTeamStats.accuratePasses,
+        inaccuratePasses: awayTeamStats.inaccuratePasses,
+        corners: awayTeamStats.corners,
+        fouls: awayTeamStats.fouls,
+        yellowCards: awayTeamStats.yellowCards,
+        redCards: awayTeamStats.redCards,
+      },
+      create: {
+        matchId: match.id,
+        teamId: match.awayTeamId,
+        possessionPercent: possession.away,
+        possessionSeconds: awayTeamStats.possessionSeconds,
+        totalShots: awayTeamStats.totalShots,
+        shotsOnTarget: awayTeamStats.shotsOnTarget,
+        shotsOffTarget: awayTeamStats.shotsOffTarget,
+        totalPasses: awayTeamStats.totalPasses,
+        accuratePasses: awayTeamStats.accuratePasses,
+        inaccuratePasses: awayTeamStats.inaccuratePasses,
+        corners: awayTeamStats.corners,
+        fouls: awayTeamStats.fouls,
+        yellowCards: awayTeamStats.yellowCards,
+        redCards: awayTeamStats.redCards,
+      },
+    });
+
+    if (match.status === "LIVE") {
+      const withTeams = await tx.match.findUnique({
+        where: { id: match.id },
+        include: {
+          homeTeam: { select: { id: true, name: true } },
+          awayTeam: { select: { id: true, name: true } },
+        },
+      });
+
+      if (withTeams) {
+        for (const goal of payload.goalEvents) {
+          const scorerName = goal.scorerName?.trim() || "Unknown scorer";
+          const key = `${goal.teamId}|${scorerName}|${goal.minuteBase}|${goal.minuteExtra ?? 0}|${goal.goalType}`;
+          if (existingGoalKeys.has(key)) continue;
+          await notifyFavoriteMatchGoal({
+            matchId: match.id,
+            homeTeam: withTeams.homeTeam.name,
+            awayTeam: withTeams.awayTeam.name,
+            teamName: goal.teamId === withTeams.homeTeam.id ? withTeams.homeTeam.name : withTeams.awayTeam.name,
+            scorerName,
+            minuteBase: goal.minuteBase,
+            minuteExtra: goal.minuteExtra,
+            regularTimeMinutes: match.regularTimeMinutes,
+            dedupeSuffix: key,
+          });
+        }
+      }
+    }
+
+    if (match.status !== "FINISHED" && updatedMatch.status === "FINISHED") {
+      const withTeams = await tx.match.findUnique({
+        where: { id: match.id },
+        include: {
+          homeTeam: { select: { name: true } },
+          awayTeam: { select: { name: true } },
+        },
+      });
+      if (withTeams) {
+        await notifyFavoriteMatchFinished({
+          matchId: withTeams.id,
+          homeTeam: withTeams.homeTeam.name,
+          awayTeam: withTeams.awayTeam.name,
+          homeScore: updatedMatch.homeScore,
+          awayScore: updatedMatch.awayScore,
+        });
+      }
+    }
+
+    return updatedMatch;
+  });
+}
+
+export async function resetMatchDetails(organizationId: string, matchId: string) {
+  const match = await prisma.match.findFirst({
+    where: { id: matchId, competition: { organizationId } },
+    select: { id: true },
+  });
+
+  if (!match) return null;
+
+  return prisma.$transaction(async (tx) => {
+    await tx.matchGoalEvent.deleteMany({ where: { matchId } });
+    await tx.matchTeamStats.deleteMany({ where: { matchId } });
+    return tx.match.update({
+      where: { id: matchId },
+      data: {
+        homeScore: 0,
+        awayScore: 0,
+        status: "SCHEDULED",
+      },
+    });
+  });
+}

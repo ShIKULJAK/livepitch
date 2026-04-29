@@ -1,0 +1,171 @@
+"use client";
+
+import { Bell, Check, Goal, MessageSquare, Search, UserRound } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { signOut } from "next-auth/react";
+import { Input } from "@/components/ui/input";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { Select } from "@/components/ui/select";
+import { useI18n } from "@/lib/i18n";
+import { useCurrentUser } from "@/hooks/use-current-user";
+import { Button } from "@/components/ui/button";
+import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "@/hooks/use-competitions";
+import { formatDateTimeStable } from "@/lib/utils/date";
+
+export function Topbar() {
+  const { locale, setLocale, t } = useI18n();
+  const { user } = useCurrentUser();
+  const router = useRouter();
+  const notificationsQuery = useNotifications();
+  const markNotificationRead = useMarkNotificationRead();
+  const markAllNotificationsRead = useMarkAllNotificationsRead();
+  const [open, setOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function onClickOutside(event: MouseEvent) {
+      if (!dropdownRef.current) return;
+      if (!dropdownRef.current.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  function formatWhen(value: string) {
+    return formatDateTimeStable(value);
+  }
+
+  const unreadCount = notificationsQuery.data?.unreadCount ?? 0;
+
+  async function handleLogout() {
+    await signOut({ redirect: false });
+    router.replace("/login");
+    router.refresh();
+  }
+
+  return (
+    <header className="sticky top-0 z-30 border-b px-4 py-3 backdrop-blur lg:px-6" style={{ borderColor: "var(--border)", backgroundColor: "color-mix(in srgb,var(--bg) 85%, transparent)" }}>
+      <div className="flex items-center gap-3">
+        <div className="relative hidden w-full max-w-md md:block">
+          <label htmlFor="topbar-search" className="sr-only">
+            Search tournaments, teams and matches
+          </label>
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: "var(--text-secondary)" }} />
+          <Input id="topbar-search" className="pl-9" placeholder={t("topbar.searchPlaceholder")} />
+        </div>
+        <div className="relative ml-auto" ref={dropdownRef}>
+          <button
+            className="relative rounded-xl border p-2"
+            style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }}
+            aria-label="Open notifications"
+            onClick={() => setOpen((current) => !current)}
+          >
+            <Bell className="h-4 w-4" />
+            {unreadCount > 0 ? (
+              <span
+                className="absolute -right-1 -top-1 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold"
+                style={{ backgroundColor: "var(--danger)", color: "white" }}
+              >
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            ) : null}
+          </button>
+          {open ? (
+            <div
+              className="absolute right-0 z-50 mt-2 w-[360px] rounded-2xl border p-2 shadow-xl"
+              style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }}
+            >
+              <div className="mb-2 flex items-center justify-between px-2 py-1">
+                <p className="font-semibold">Notifications</p>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => markAllNotificationsRead.mutate()}
+                  disabled={markAllNotificationsRead.isPending || unreadCount === 0}
+                >
+                  Mark all as read
+                </Button>
+              </div>
+              <div className="max-h-96 space-y-1 overflow-y-auto px-1 pb-1 lp-scrollbar">
+                {notificationsQuery.data?.notifications.length ? (
+                  notificationsQuery.data.notifications.map((notification) => (
+                    <button
+                      key={notification.id}
+                      type="button"
+                      className="w-full rounded-xl border p-3 text-left"
+                      style={{
+                        borderColor: "var(--border)",
+                        backgroundColor: notification.isRead
+                          ? "var(--surface-1)"
+                          : "color-mix(in srgb, var(--primary) 10%, var(--surface-2))",
+                      }}
+                      onClick={async () => {
+                        if (!notification.isRead) {
+                          try {
+                            await markNotificationRead.mutateAsync(notification.id);
+                          } catch {
+                            // Keep navigation responsive even if mark-read fails.
+                          }
+                        }
+                        setOpen(false);
+                        router.push(notification.link);
+                      }}
+                    >
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          {notification.type === "MESSAGE_RECEIVED" ? (
+                            <MessageSquare className="h-4 w-4" />
+                          ) : notification.type === "FAVORITE_MATCH_GOAL" ? (
+                            <Goal className="h-4 w-4" />
+                          ) : (
+                            <Check className="h-4 w-4" />
+                          )}
+                          <p className="text-sm font-semibold">{notification.title}</p>
+                        </div>
+                        {!notification.isRead ? <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--primary)" }} /> : null}
+                      </div>
+                      <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                        {notification.body}
+                      </p>
+                      <p className="mt-1 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                        {formatWhen(notification.createdAt)}
+                      </p>
+                    </button>
+                  ))
+                ) : (
+                  <p className="px-2 py-4 text-sm" style={{ color: "var(--text-secondary)" }}>
+                    No notifications yet.
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <Select
+          aria-label="Language"
+          value={locale}
+          onChange={(event) => setLocale(event.currentTarget.value as "bs" | "en")}
+          className="h-10 w-20 text-xs"
+        >
+          <option value="bs">BS</option>
+          <option value="en">EN</option>
+        </Select>
+        <ThemeToggle />
+        <div className="flex items-center gap-2 rounded-xl border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }}>
+          <UserRound className="h-4 w-4" style={{ color: "var(--primary)" }} />
+          <div className="hidden md:block">
+            <p className="text-xs leading-none">{user?.name ?? "Guest"}</p>
+            <p className="mt-1 text-[10px] uppercase tracking-wide" style={{ color: "var(--text-secondary)" }}>{user?.role ?? "-"}</p>
+          </div>
+        </div>
+        {user ? (
+          <Button variant="ghost" size="sm" onClick={() => void handleLogout()}>
+            {t("common.logout")}
+          </Button>
+        ) : null}
+      </div>
+    </header>
+  );
+}
+

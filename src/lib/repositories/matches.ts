@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import type { z } from "zod";
 import { calculatePossessionPercentages } from "@/lib/constants/match";
 import { notifyFavoriteMatchFinished, notifyFavoriteMatchGoal } from "@/lib/notifications";
+import { canEditEntity } from "@/lib/permissions";
 import { matchDetailsUpdateSchema } from "@/lib/validation/match-details";
 import { matchInputSchema, matchUpdateSchema } from "@/lib/validation/match";
 
@@ -13,13 +14,13 @@ type MatchDetailsUpdate = z.infer<typeof matchDetailsUpdateSchema>;
 async function assertCompetitionOwnership(organizationId: string, competitionId: string) {
   return prisma.competition.findFirst({
     where: { id: competitionId, organizationId },
-    select: { id: true, matchDurationMinutes: true },
+    select: { id: true, matchDurationMinutes: true, createdById: true },
   });
 }
 
 const FRIENDLY_COMPETITION_OPTION = "__friendly_game__";
 
-async function resolveCompetitionForCreate(organizationId: string, competitionId: string, homeTeamId: string) {
+async function resolveCompetitionForCreate(organizationId: string, competitionId: string, homeTeamId: string, actorId: string) {
   if (competitionId !== FRIENDLY_COMPETITION_OPTION) {
     const competition = await assertCompetitionOwnership(organizationId, competitionId);
     if (!competition) throw new Error("Forbidden");
@@ -47,6 +48,7 @@ async function resolveCompetitionForCreate(organizationId: string, competitionId
   return prisma.competition.create({
     data: {
       organizationId,
+      createdById: actorId,
       type: "FRIENDLY_MATCH",
       sport: homeTeam.sport,
       name: "Friendly Game",
@@ -59,8 +61,8 @@ async function resolveCompetitionForCreate(organizationId: string, competitionId
   });
 }
 
-export async function createMatch(organizationId: string, input: MatchInput) {
-  const competition = await resolveCompetitionForCreate(organizationId, input.competitionId, input.homeTeamId);
+export async function createMatch(organizationId: string, actorId: string, input: MatchInput) {
+  const competition = await resolveCompetitionForCreate(organizationId, input.competitionId, input.homeTeamId, actorId);
 
   return prisma.match.create({
     data: {
@@ -75,17 +77,19 @@ export async function createMatch(organizationId: string, input: MatchInput) {
       awayScore: input.awayScore ?? null,
       liveMinute: input.liveMinute ?? null,
       regularTimeMinutes: competition.matchDurationMinutes,
+      createdById: actorId,
     },
   });
 }
 
-export async function updateMatch(organizationId: string, matchId: string, input: MatchUpdate) {
+export async function updateMatch(organizationId: string, actor: { id: string; role: string }, matchId: string, input: MatchUpdate) {
   const existing = await prisma.match.findFirst({
     where: { id: matchId, competition: { organizationId } },
-    select: { id: true, status: true },
+    select: { id: true, status: true, createdById: true },
   });
 
   if (!existing) return null;
+  if (!canEditEntity(actor, existing)) throw new Error("Forbidden");
 
   const updated = await prisma.match.update({
     where: { id: existing.id },
@@ -126,13 +130,14 @@ export async function updateMatch(organizationId: string, matchId: string, input
   return updated;
 }
 
-export async function deleteMatch(organizationId: string, matchId: string) {
+export async function deleteMatch(organizationId: string, actor: { id: string; role: string }, matchId: string) {
   const existing = await prisma.match.findFirst({
     where: { id: matchId, competition: { organizationId } },
-    select: { id: true },
+    select: { id: true, createdById: true },
   });
 
   if (!existing) return null;
+  if (!canEditEntity(actor, existing)) throw new Error("Forbidden");
   return prisma.match.delete({ where: { id: existing.id } });
 }
 
@@ -199,13 +204,19 @@ export async function getMatchDetails(organizationId: string, matchId: string) {
   });
 }
 
-export async function saveMatchDetails(organizationId: string, matchId: string, payload: MatchDetailsUpdate) {
+export async function saveMatchDetails(
+  organizationId: string,
+  actor: { id: string; role: string },
+  matchId: string,
+  payload: MatchDetailsUpdate
+) {
   const match = await prisma.match.findFirst({
     where: { id: matchId, competition: { organizationId } },
-    select: { id: true, homeTeamId: true, awayTeamId: true, status: true, regularTimeMinutes: true },
+    select: { id: true, homeTeamId: true, awayTeamId: true, status: true, regularTimeMinutes: true, createdById: true },
   });
 
   if (!match) return null;
+  if (!canEditEntity(actor, match)) throw new Error("Forbidden");
 
   const homeTeamStats = payload.teamStats.find((item) => item.teamId === match.homeTeamId);
   const awayTeamStats = payload.teamStats.find((item) => item.teamId === match.awayTeamId);
@@ -248,6 +259,7 @@ export async function saveMatchDetails(organizationId: string, matchId: string, 
           minuteBase: event.minuteBase,
           minuteExtra: event.minuteExtra ?? null,
           goalType: event.goalType,
+          createdById: actor.id,
         })),
       });
     }
@@ -283,6 +295,7 @@ export async function saveMatchDetails(organizationId: string, matchId: string, 
         fouls: homeTeamStats.fouls,
         yellowCards: homeTeamStats.yellowCards,
         redCards: homeTeamStats.redCards,
+        createdById: actor.id,
       },
     });
 
@@ -317,6 +330,7 @@ export async function saveMatchDetails(organizationId: string, matchId: string, 
         fouls: awayTeamStats.fouls,
         yellowCards: awayTeamStats.yellowCards,
         redCards: awayTeamStats.redCards,
+        createdById: actor.id,
       },
     });
 
@@ -372,13 +386,14 @@ export async function saveMatchDetails(organizationId: string, matchId: string, 
   });
 }
 
-export async function resetMatchDetails(organizationId: string, matchId: string) {
+export async function resetMatchDetails(organizationId: string, actor: { id: string; role: string }, matchId: string) {
   const match = await prisma.match.findFirst({
     where: { id: matchId, competition: { organizationId } },
-    select: { id: true },
+    select: { id: true, createdById: true },
   });
 
   if (!match) return null;
+  if (!canEditEntity(actor, match)) throw new Error("Forbidden");
 
   return prisma.$transaction(async (tx) => {
     await tx.matchGoalEvent.deleteMany({ where: { matchId } });

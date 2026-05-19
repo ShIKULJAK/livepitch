@@ -3,7 +3,6 @@
 import { Bell, Check, Goal, MessageSquare, Search, UserRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { signOut } from "next-auth/react";
 import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Select } from "@/components/ui/select";
@@ -37,12 +36,6 @@ export function Topbar() {
   }
 
   const unreadCount = notificationsQuery.data?.unreadCount ?? 0;
-
-  async function handleLogout() {
-    await signOut({ redirect: false });
-    router.replace("/login");
-    router.refresh();
-  }
 
   return (
     <header className="sticky top-0 z-30 border-b px-4 py-3 backdrop-blur lg:px-6" style={{ borderColor: "var(--border)", backgroundColor: "color-mix(in srgb,var(--bg) 85%, transparent)" }}>
@@ -159,11 +152,9 @@ export function Topbar() {
             <p className="mt-1 text-[10px] uppercase tracking-wide" style={{ color: "var(--text-secondary)" }}>{user?.role ?? "-"}</p>
           </div>
         </div>
-        {user ? (
-          <Button variant="ghost" size="sm" onClick={() => void handleLogout()}>
-            {t("common.logout")}
-          </Button>
-        ) : null}
+        <Button variant="ghost" size="sm" onClick={() => window.location.assign("/logout")}>
+          {t("common.logout")}
+        </Button>
       </div>
     </header>
   );

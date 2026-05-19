@@ -5,7 +5,7 @@ import { MatchStatus } from "@prisma/client";
 import { useParams, useRouter } from "next/navigation";
 import { useCompetitions, useMatchDetails, useTeams, useUpdateMatch, useVenues } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import { canManageMatches } from "@/lib/permissions";
+import { canCreateMatches } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -29,7 +29,7 @@ export default function EditMatchPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { user } = useCurrentUser();
-  const canManage = canManageMatches(user?.role);
+  const canManageByRole = canCreateMatches(user?.role);
   const matchDetailsQuery = useMatchDetails(params.id);
   const competitionsQuery = useCompetitions({ type: "ALL", status: "ALL" });
   const teamsQuery = useTeams();
@@ -48,6 +48,7 @@ export default function EditMatchPage() {
   }>({});
 
   const match = matchDetailsQuery.data;
+  const canManage = canManageByRole && Boolean(match?.canEdit);
   const selectedCompetitionId = draft.competitionId ?? match?.competitionId ?? "";
   const selectedHomeTeamId = draft.homeTeamId ?? match?.homeTeam.id ?? "";
 
@@ -79,7 +80,7 @@ export default function EditMatchPage() {
   if (!canManage) {
     return (
       <Card className="p-6 text-sm" style={{ color: "var(--danger)" }}>
-        You do not have permission to edit matches.
+        You can only edit matches that you created.
       </Card>
     );
   }

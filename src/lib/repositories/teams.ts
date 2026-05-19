@@ -1,14 +1,16 @@
-﻿import { prisma } from "@/lib/db/prisma";
+import { prisma } from "@/lib/db/prisma";
+import { canEditEntity } from "@/lib/permissions";
 import type { z } from "zod";
 import { teamInputSchema, teamUpdateSchema } from "@/lib/validation/team";
 
 type TeamInput = z.infer<typeof teamInputSchema>;
 type TeamUpdate = z.infer<typeof teamUpdateSchema>;
 
-export async function createTeam(organizationId: string, input: TeamInput) {
+export async function createTeam(organizationId: string, createdById: string, input: TeamInput) {
   return prisma.team.create({
     data: {
       organizationId,
+      createdById,
       sport: input.sport,
       name: input.name,
       shortName: input.shortName ?? null,
@@ -20,9 +22,15 @@ export async function createTeam(organizationId: string, input: TeamInput) {
   });
 }
 
-export async function updateTeam(organizationId: string, teamId: string, input: TeamUpdate) {
-  const existing = await prisma.team.findFirst({ where: { id: teamId, organizationId }, select: { id: true } });
+export async function updateTeam(
+  organizationId: string,
+  actor: { id: string; role: string },
+  teamId: string,
+  input: TeamUpdate
+) {
+  const existing = await prisma.team.findFirst({ where: { id: teamId, organizationId }, select: { id: true, createdById: true } });
   if (!existing) return null;
+  if (!canEditEntity(actor, existing)) throw new Error("Forbidden");
 
   return prisma.team.update({
     where: { id: existing.id },
@@ -38,9 +46,9 @@ export async function updateTeam(organizationId: string, teamId: string, input: 
   });
 }
 
-export async function deleteTeam(organizationId: string, teamId: string) {
-  const existing = await prisma.team.findFirst({ where: { id: teamId, organizationId }, select: { id: true } });
+export async function deleteTeam(organizationId: string, actor: { id: string; role: string }, teamId: string) {
+  const existing = await prisma.team.findFirst({ where: { id: teamId, organizationId }, select: { id: true, createdById: true } });
   if (!existing) return null;
+  if (!canEditEntity(actor, existing)) throw new Error("Forbidden");
   return prisma.team.delete({ where: { id: existing.id } });
 }
-

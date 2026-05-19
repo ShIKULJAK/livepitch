@@ -11,9 +11,6 @@ const credentialsSchema = z.object({
 
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
-  pages: {
-    signIn: "/login",
-  },
   providers: [
     CredentialsProvider({
       name: "Credentials",
@@ -46,6 +43,19 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
+    async redirect({ url, baseUrl }) {
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+
+      try {
+        const requested = new URL(url);
+        const origin = new URL(baseUrl).origin;
+        if (requested.origin === origin) return url;
+      } catch {
+        return baseUrl;
+      }
+
+      return baseUrl;
+    },
     async jwt({ token, user }) {
       if (user) {
         token.role = (user as { role: string }).role;

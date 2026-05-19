@@ -1,0 +1,20 @@
+
+> live_pitch@0.1.0 dev
+> next dev --hostname 0.0.0.0 --port 3000
+
+▲ Next.js 16.2.4 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://0.0.0.0:3000
+- Environments: .env
+✓ Ready in 470ms
+Creating turbopack project {
+  dir: 'B:\\web programiranja\\vibe_coding\\live_pitch',
+  testMode: true
+}
+
+ GET / 200 in 581ms (next.js: 189ms, proxy.ts: 104ms, application-code: 287ms)
+ GET /api/auth/session 200 in 1145ms (next.js: 1106ms, proxy.ts: 10ms, application-code: 29ms)
+ GET /api/auth/session 200 in 1138ms (next.js: 1080ms, proxy.ts: 26ms, application-code: 31ms)
+ GET / 200 in 53ms (next.js: 4ms, proxy.ts: 5ms, application-code: 44ms)
+ GET / 200 in 46ms (next.js: 3ms, proxy.ts: 4ms, application-code: 39ms)
+[?25h

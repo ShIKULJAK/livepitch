@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { canEditContent } from "@/lib/permissions";
+import { canCreatePlayers } from "@/lib/permissions";
 import { deletePlayer, updatePlayer } from "@/lib/repositories/players";
 import { ImageProcessingError, processAndStoreProfileImage } from "@/lib/server/image-processing";
 import { playerUpdateSchema } from "@/lib/validation/player";
@@ -8,7 +8,7 @@ import { playerUpdateSchema } from "@/lib/validation/player";
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const currentUser = await requireAuth();
 
-  if (!canEditContent(currentUser.role)) {
+  if (!canCreatePlayers(currentUser.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -62,13 +62,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
 
   try {
-    const data = await updatePlayer(currentUser.organizationId, id, parsed.data);
+    const data = await updatePlayer(currentUser.organizationId, { id: currentUser.id, role: currentUser.role }, id, parsed.data);
     if (!data) {
       return NextResponse.json({ error: "Player not found" }, { status: 404 });
     }
 
     return NextResponse.json({ data });
   } catch (error) {
+    if (error instanceof Error && error.message === "Forbidden") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const message = error instanceof Error ? error.message : "Internal server error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -77,12 +80,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const currentUser = await requireAuth();
 
-  if (!canEditContent(currentUser.role)) {
+  if (!canCreatePlayers(currentUser.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { id } = await params;
-  const data = await deletePlayer(currentUser.organizationId, id);
+  let data = null;
+  try {
+    data = await deletePlayer(currentUser.organizationId, { id: currentUser.id, role: currentUser.role }, id);
+  } catch (error) {
+    if (error instanceof Error && error.message === "Forbidden") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    throw error;
+  }
   if (!data) {
     return NextResponse.json({ error: "Player not found" }, { status: 404 });
   }

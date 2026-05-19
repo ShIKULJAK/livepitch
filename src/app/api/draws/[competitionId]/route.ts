@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { generateDraw, getDrawByCompetition, resetDraw } from "@/lib/repositories/draws";
-import { canManageTournaments } from "@/lib/permissions";
+import { canCreateDraws, canEditEntity } from "@/lib/permissions";
 import { drawConfigSchema } from "@/lib/validation/draw";
 
 export async function GET(_: Request, { params }: { params: Promise<{ competitionId: string }> }) {
@@ -13,12 +13,17 @@ export async function GET(_: Request, { params }: { params: Promise<{ competitio
     return NextResponse.json({ error: "Competition not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ data });
+  return NextResponse.json({
+    data: {
+      ...data,
+      canManage: canEditEntity({ id: currentUser.id, role: currentUser.role }, data.competition),
+    },
+  });
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ competitionId: string }> }) {
   const currentUser = await requireAuth();
-  if (!canManageTournaments(currentUser.role)) {
+  if (!canCreateDraws(currentUser.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -30,13 +35,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ com
 
   const { competitionId } = await params;
   try {
-    const draw = await generateDraw(currentUser.organizationId, competitionId, parsed.data);
+    const draw = await generateDraw(currentUser.organizationId, { id: currentUser.id, role: currentUser.role }, competitionId, parsed.data);
     if (!draw) {
       return NextResponse.json({ error: "Competition not found" }, { status: 404 });
     }
 
     return NextResponse.json({ data: draw }, { status: 201 });
   } catch (error) {
+    if (error instanceof Error && error.message === "Forbidden") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const message = error instanceof Error ? error.message : "Internal server error";
     return NextResponse.json({ error: message }, { status: 400 });
   }
@@ -48,12 +56,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ co
 
 export async function DELETE(_: Request, { params }: { params: Promise<{ competitionId: string }> }) {
   const currentUser = await requireAuth();
-  if (!canManageTournaments(currentUser.role)) {
+  if (!canCreateDraws(currentUser.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { competitionId } = await params;
-  const data = await resetDraw(currentUser.organizationId, competitionId);
+  let data = null;
+  try {
+    data = await resetDraw(currentUser.organizationId, { id: currentUser.id, role: currentUser.role }, competitionId);
+  } catch (error) {
+    if (error instanceof Error && error.message === "Forbidden") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    throw error;
+  }
   if (!data) {
     return NextResponse.json({ error: "Competition not found" }, { status: 404 });
   }

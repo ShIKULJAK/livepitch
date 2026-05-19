@@ -1,7 +1,7 @@
 import { MatchStatus } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { canManageMatches } from "@/lib/permissions";
+import { canCreateMatches } from "@/lib/permissions";
 import { createMatch as createMatchRecord } from "@/lib/repositories/matches";
 import { listMatches } from "@/lib/server/competitions";
 import { matchInputSchema } from "@/lib/validation/match";
@@ -24,7 +24,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const currentUser = await requireAuth();
 
-  if (!canManageMatches(currentUser.role)) {
+  if (!canCreateMatches(currentUser.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -35,7 +35,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid payload", issues: parsed.error.issues }, { status: 400 });
   }
 
-  const data = await createMatchRecord(currentUser.organizationId, parsed.data);
+  const data = await createMatchRecord(currentUser.organizationId, currentUser.id, parsed.data);
   return NextResponse.json({ data }, { status: 201 });
 }
-

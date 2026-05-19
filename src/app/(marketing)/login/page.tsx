@@ -1,46 +1,22 @@
-"use client";
-
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { AuthProgress } from "@/components/ui/auth-progress";
 
-export default function LoginPage() {
-  const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+type LoginPageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
 
-  const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setPending(true);
-    setError(null);
+function readFirst(value: string | string[] | undefined) {
+  if (Array.isArray(value)) return value[0] ?? "";
+  return value ?? "";
+}
 
-    try {
-      const result = await signIn("credentials", {
-        email,
-        password,
-        redirect: false,
-      });
-
-      if (result?.error) {
-        setError("Invalid email or password.");
-        return;
-      }
-
-      router.replace("/dashboard");
-      router.refresh();
-    } catch {
-      setError("Login failed. Please try again.");
-    } finally {
-      setPending(false);
-    }
-  };
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const params = (await searchParams) ?? {};
+  const callbackUrl = readFirst(params.callbackUrl) || "/dashboard";
+  const error = readFirst(params.error);
+  const showCredentialsError = error === "CredentialsSignin";
 
   return (
     <main className="grid min-h-screen place-items-center p-4">
@@ -49,18 +25,11 @@ export default function LoginPage() {
         <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>
           Sign in to continue.
         </p>
-        <form className="mt-6 space-y-4" onSubmit={handleLogin} noValidate>
-          {pending ? <AuthProgress label="Verifying credentials and preparing your session..." /> : null}
+        <form className="mt-6 space-y-4" action="/api/auth/local-login" method="POST" noValidate>
+          <input type="hidden" name="callbackUrl" value={callbackUrl} />
           <div>
             <label className="mb-1 block text-sm">Email</label>
-            <Input
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(event) => setEmail(event.currentTarget.value)}
-              autoComplete="email"
-              required
-            />
+            <Input type="email" name="email" placeholder="you@example.com" autoComplete="email" required />
           </div>
           <div>
             <div className="mb-1 flex items-center justify-between text-sm">
@@ -69,28 +38,25 @@ export default function LoginPage() {
                 Forgot password?
               </Link>
             </div>
-            <Input
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(event) => setPassword(event.currentTarget.value)}
-              autoComplete="current-password"
-              required
-            />
+            <Input type="password" name="password" placeholder="••••••••" autoComplete="current-password" required />
           </div>
-          {error ? (
+          {showCredentialsError ? (
             <p className="text-sm" style={{ color: "var(--danger)" }}>
-              {error}
+              Invalid email or password.
             </p>
           ) : null}
-          <Button variant="primary" className="w-full" type="submit" disabled={pending}>
-            {pending ? "Logging in..." : "Login"}
+          <Button variant="primary" className="w-full" type="submit">
+            Login
           </Button>
           <p className="text-center text-sm" style={{ color: "var(--text-secondary)" }}>
-            No account? <Link href="/signup" style={{ color: "var(--primary)" }}>Sign up</Link>
+            No account?{" "}
+            <Link href="/signup" style={{ color: "var(--primary)" }}>
+              Sign up
+            </Link>
           </p>
         </form>
       </Card>
     </main>
   );
 }
+

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { canManageTeams } from "@/lib/permissions";
+import { canCreateTeams } from "@/lib/permissions";
 import { deleteTeam, updateTeam } from "@/lib/repositories/teams";
 import { ImageProcessingError, processAndStoreProfileImage } from "@/lib/server/image-processing";
 import { teamUpdateSchema } from "@/lib/validation/team";
@@ -8,7 +8,7 @@ import { teamUpdateSchema } from "@/lib/validation/team";
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const currentUser = await requireAuth();
 
-  if (!canManageTeams(currentUser.role)) {
+  if (!canCreateTeams(currentUser.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -52,7 +52,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   const { id } = await params;
-  const data = await updateTeam(currentUser.organizationId, id, parsed.data);
+  let data = null;
+  try {
+    data = await updateTeam(currentUser.organizationId, { id: currentUser.id, role: currentUser.role }, id, parsed.data);
+  } catch (error) {
+    if (error instanceof Error && error.message === "Forbidden") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    throw error;
+  }
 
   if (!data) {
     return NextResponse.json({ error: "Team not found" }, { status: 404 });
@@ -64,12 +72,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const currentUser = await requireAuth();
 
-  if (!canManageTeams(currentUser.role)) {
+  if (!canCreateTeams(currentUser.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { id } = await params;
-  const data = await deleteTeam(currentUser.organizationId, id);
+  let data = null;
+  try {
+    data = await deleteTeam(currentUser.organizationId, { id: currentUser.id, role: currentUser.role }, id);
+  } catch (error) {
+    if (error instanceof Error && error.message === "Forbidden") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    throw error;
+  }
 
   if (!data) {
     return NextResponse.json({ error: "Team not found" }, { status: 404 });

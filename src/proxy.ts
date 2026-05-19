@@ -1,4 +1,5 @@
-﻿import { getToken } from "next-auth/jwt";
+import { getToken } from "next-auth/jwt";
+import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/check-email", "/api/auth", "/icon.svg"];
@@ -7,6 +8,11 @@ const adminOnlyRoutes = ["/settings/roles", "/settings/billing", "/settings/secu
 export default async function proxy(request: NextRequest) {
   const { nextUrl } = request;
   const pathname = nextUrl.pathname;
+  const hasEmptyQuerySuffix = nextUrl.search === "?";
+
+  if ((pathname === "/login" || pathname === "/signup") && hasEmptyQuerySuffix) {
+    return Response.redirect(new URL(pathname, nextUrl.origin));
+  }
 
   const isPublic = publicRoutes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
 
@@ -28,9 +34,14 @@ export default async function proxy(request: NextRequest) {
     return Response.redirect(new URL("/forbidden", nextUrl.origin));
   }
 
-  return undefined;
+  const response = NextResponse.next();
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  response.headers.set("Pragma", "no-cache");
+  response.headers.set("Expires", "0");
+  return response;
 }
 
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
+

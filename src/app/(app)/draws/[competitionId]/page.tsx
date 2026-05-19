@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useCompetitionDraw, useGenerateDraw, useResetDraw } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import { canManageTournaments } from "@/lib/permissions";
+import { canCreateDraws } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -23,7 +23,7 @@ const roundLabels: Record<string, string> = {
 export default function CompetitionDrawPage() {
   const params = useParams<{ competitionId: string }>();
   const { user } = useCurrentUser();
-  const canManage = canManageTournaments(user?.role);
+  const canManageByRole = canCreateDraws(user?.role);
   const drawQuery = useCompetitionDraw(params.competitionId);
   const generateDraw = useGenerateDraw(params.competitionId);
   const resetDraw = useResetDraw(params.competitionId);
@@ -45,6 +45,7 @@ export default function CompetitionDrawPage() {
   }
 
   const { competition, draw } = drawQuery.data;
+  const canManage = canManageByRole && Boolean(drawQuery.data.canManage);
   const isTournament = competition.type === "TOURNAMENT";
 
   const currentConfig = {

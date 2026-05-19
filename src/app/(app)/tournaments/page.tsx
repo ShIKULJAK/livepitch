@@ -6,7 +6,7 @@ import { FavoriteTargetType } from "@prisma/client";
 import { useDeleteCompetition, useCompetitions } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useI18n } from "@/lib/i18n";
-import { canManageTournaments } from "@/lib/permissions";
+import { canCreateCompetitions, canEditEntity } from "@/lib/permissions";
 import { formatDateDDMMYYYY } from "@/lib/utils/date";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -46,7 +46,7 @@ export default function TournamentsPage() {
   const competitionsQuery = useCompetitions(filters);
   const deleteCompetition = useDeleteCompetition();
   const { user } = useCurrentUser();
-  const canManage = canManageTournaments(user?.role);
+  const canManage = canCreateCompetitions(user?.role);
 
   return (
     <div className="space-y-4">
@@ -97,6 +97,9 @@ export default function TournamentsPage() {
 
       <div className="space-y-3">
         {competitionsQuery.data?.map((item) => (
+          (() => {
+            const canEditRow = canEditEntity(user, item);
+            return (
           <Card key={item.id} className="grid gap-3 p-4 md:grid-cols-[1fr_auto] md:items-center">
             <div>
               <div className="flex flex-wrap items-center gap-2">
@@ -120,7 +123,7 @@ export default function TournamentsPage() {
               <Link href={`/matches?competitionId=${item.id}`}>
                 <Button>{t("tournaments.openMatches")}</Button>
               </Link>
-              {canManage ? (
+              {canEditRow ? (
                 <Link href={`/tournaments/${item.id}/edit`}>
                   <Button>Edit</Button>
                 </Link>
@@ -128,7 +131,7 @@ export default function TournamentsPage() {
               <Link href={`/draws/${item.id}`}>
                 <Button>{item.type === "TOURNAMENT" ? "Open Draw" : "League Info"}</Button>
               </Link>
-              {canManage ? (
+              {canEditRow ? (
                 <Button
                   variant="danger"
                   onClick={() => {
@@ -142,6 +145,8 @@ export default function TournamentsPage() {
               ) : null}
             </div>
           </Card>
+            );
+          })()
         ))}
       </div>
 

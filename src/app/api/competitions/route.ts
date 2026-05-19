@@ -1,6 +1,6 @@
 ﻿import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { canManageTournaments } from "@/lib/permissions";
+import { canCreateCompetitions } from "@/lib/permissions";
 import { createCompetition, listCompetitions } from "@/lib/server/competitions";
 import { competitionQuerySchema, createCompetitionSchema } from "@/lib/validation/competition";
 
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const currentUser = await requireAuth();
-    if (!canManageTournaments(currentUser.role)) {
+    if (!canCreateCompetitions(currentUser.role)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid payload", issues: parsed.error.issues }, { status: 400 });
     }
 
-    const created = await createCompetition(currentUser.organizationId, parsed.data);
+    const created = await createCompetition(currentUser.organizationId, currentUser.id, parsed.data);
     return NextResponse.json({ data: created }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal server error";

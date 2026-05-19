@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { canManageMatches } from "@/lib/permissions";
+import { canCreateMatches, canEditEntity } from "@/lib/permissions";
 import { calculatePossessionPercentages } from "@/lib/constants/match";
 import { getMatchDetails, resetMatchDetails, saveMatchDetails } from "@/lib/repositories/matches";
 import { matchDetailsUpdateSchema } from "@/lib/validation/match-details";
@@ -13,6 +13,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   if (!match) {
     return NextResponse.json({ error: "Match not found" }, { status: 404 });
   }
+  const canEdit = canEditEntity({ id: currentUser.id, role: currentUser.role }, match);
 
   const homeStats = match.teamStats.find((item) => item.teamId === match.homeTeamId);
   const awayStats = match.teamStats.find((item) => item.teamId === match.awayTeamId);
@@ -30,6 +31,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       venue: match.venue?.name ?? "TBD",
       venueId: match.venueId,
       regularTimeMinutes: match.regularTimeMinutes,
+      createdById: match.createdById,
+      canEdit,
       competitionMatchDurationMinutes: match.competition.matchDurationMinutes,
       homeTeam: {
         id: match.homeTeam.id,
@@ -94,7 +97,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const currentUser = await requireAuth();
 
-  if (!canManageMatches(currentUser.role)) {
+  if (!canCreateMatches(currentUser.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -107,13 +110,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
 
   try {
-    const data = await saveMatchDetails(currentUser.organizationId, id, parsed.data);
+    const data = await saveMatchDetails(currentUser.organizationId, { id: currentUser.id, role: currentUser.role }, id, parsed.data);
     if (!data) {
       return NextResponse.json({ error: "Match not found" }, { status: 404 });
     }
 
     return NextResponse.json({ data });
   } catch (error) {
+    if (error instanceof Error && error.message === "Forbidden") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to update match details" }, { status: 400 });
   }
 }
@@ -121,12 +127,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const currentUser = await requireAuth();
 
-  if (!canManageMatches(currentUser.role)) {
+  if (!canCreateMatches(currentUser.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { id } = await params;
-  const data = await resetMatchDetails(currentUser.organizationId, id);
+  let data = null;
+  try {
+    data = await resetMatchDetails(currentUser.organizationId, { id: currentUser.id, role: currentUser.role }, id);
+  } catch (error) {
+    if (error instanceof Error && error.message === "Forbidden") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    throw error;
+  }
   if (!data) {
     return NextResponse.json({ error: "Match not found" }, { status: 404 });
   }

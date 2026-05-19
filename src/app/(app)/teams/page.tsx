@@ -10,7 +10,7 @@ import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
-import { canManageTeams } from "@/lib/permissions";
+import { canCreateTeams, canEditEntity } from "@/lib/permissions";
 import { FavoriteTargetType } from "@prisma/client";
 import { FavoriteButton } from "@/components/ui/favorite-button";
 
@@ -19,7 +19,7 @@ export default function TeamsPage() {
   const teamsQuery = useTeams();
   const { user } = useCurrentUser();
   const [query, setQuery] = useState("");
-  const canCreate = canManageTeams(user?.role);
+  const canCreate = canCreateTeams(user?.role);
   const deleteTeam = useDeleteTeam();
 
   const rows = useMemo(
@@ -52,6 +52,9 @@ export default function TeamsPage() {
             </thead>
             <tbody>
               {rows.map((team) => (
+                (() => {
+                  const canEditRow = canEditEntity(user, team);
+                  return (
                 <tr key={team.id} className="border-t" style={{ borderColor: "var(--border)" }}>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -67,7 +70,7 @@ export default function TeamsPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <Link href={`/teams/${team.id}`} style={{ color: "var(--primary)" }}>{t("common.open")}</Link>
-                      {canCreate ? (
+                      {canEditRow ? (
                         <>
                           <Link href={`/teams/${team.id}/edit`} style={{ color: "var(--info)" }}>
                             Edit
@@ -88,6 +91,8 @@ export default function TeamsPage() {
                     </div>
                   </td>
                 </tr>
+                  );
+                })()
               ))}
             </tbody>
           </table>

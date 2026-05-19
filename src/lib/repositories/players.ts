@@ -1,11 +1,12 @@
 import { prisma } from "@/lib/db/prisma";
+import { canEditEntity } from "@/lib/permissions";
 import type { z } from "zod";
 import { playerInputSchema, playerUpdateSchema } from "@/lib/validation/player";
 
 type PlayerInput = z.infer<typeof playerInputSchema>;
 type PlayerUpdate = z.infer<typeof playerUpdateSchema>;
 
-export async function createPlayer(organizationId: string, input: PlayerInput) {
+export async function createPlayer(organizationId: string, createdById: string, input: PlayerInput) {
   const team = await prisma.team.findFirst({
     where: { id: input.teamId, organizationId },
     select: { id: true },
@@ -17,6 +18,7 @@ export async function createPlayer(organizationId: string, input: PlayerInput) {
 
   return prisma.player.create({
     data: {
+      createdById,
       sport: input.sport,
       teamId: input.teamId,
       firstName: input.firstName,
@@ -37,13 +39,19 @@ export async function createPlayer(organizationId: string, input: PlayerInput) {
   });
 }
 
-export async function updatePlayer(organizationId: string, playerId: string, input: PlayerUpdate) {
+export async function updatePlayer(
+  organizationId: string,
+  actor: { id: string; role: string },
+  playerId: string,
+  input: PlayerUpdate
+) {
   const existing = await prisma.player.findFirst({
     where: { id: playerId, team: { organizationId } },
-    select: { id: true, teamId: true },
+    select: { id: true, teamId: true, createdById: true },
   });
 
   if (!existing) return null;
+  if (!canEditEntity(actor, existing)) throw new Error("Forbidden");
 
   if (input.teamId) {
     const team = await prisma.team.findFirst({ where: { id: input.teamId, organizationId }, select: { id: true } });
@@ -83,11 +91,12 @@ export async function updatePlayer(organizationId: string, playerId: string, inp
   });
 }
 
-export async function deletePlayer(organizationId: string, playerId: string) {
+export async function deletePlayer(organizationId: string, actor: { id: string; role: string }, playerId: string) {
   const existing = await prisma.player.findFirst({
     where: { id: playerId, team: { organizationId } },
-    select: { id: true },
+    select: { id: true, createdById: true },
   });
   if (!existing) return null;
+  if (!canEditEntity(actor, existing)) throw new Error("Forbidden");
   return prisma.player.delete({ where: { id: existing.id } });
 }

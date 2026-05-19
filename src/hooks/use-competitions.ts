@@ -23,6 +23,7 @@ const competitionListResponse = z.object({
   data: z.array(
     z.object({
       id: z.string(),
+      createdById: z.string().nullable().optional(),
       name: z.string(),
       type: z.nativeEnum(CompetitionType),
       status: z.nativeEnum(CompetitionStatus),
@@ -41,6 +42,7 @@ const competitionListResponse = z.object({
 const competitionDetailsResponse = z.object({
   data: z.object({
     id: z.string(),
+    createdById: z.string().nullable().optional(),
     name: z.string(),
     type: z.nativeEnum(CompetitionType),
     sport: z.nativeEnum(SportType),
@@ -69,6 +71,7 @@ const competitionDetailsResponse = z.object({
         }),
       })
     ),
+    canEdit: z.boolean().optional(),
   }),
 });
 
@@ -86,6 +89,7 @@ const teamsResponse = z.object({
   data: z.array(
     z.object({
       id: z.string(),
+      createdById: z.string().nullable().optional(),
       sport: z.nativeEnum(SportType),
       name: z.string(),
       shortName: z.string().nullable(),
@@ -109,6 +113,7 @@ const playersResponse = z.object({
   data: z.array(
     z.object({
       id: z.string(),
+      createdById: z.string().nullable().optional(),
       sport: z.nativeEnum(SportType),
       firstName: z.string().nullable(),
       lastName: z.string().nullable(),
@@ -136,6 +141,7 @@ const matchesResponse = z.object({
   data: z.array(
     z.object({
       id: z.string(),
+      createdById: z.string().nullable().optional(),
       competitionId: z.string(),
       competition: z.string(),
       competitionType: z.nativeEnum(CompetitionType),
@@ -167,6 +173,8 @@ const matchDetailsResponse = z.object({
     venue: z.string(),
     venueId: z.string().nullable(),
     regularTimeMinutes: z.number(),
+    createdById: z.string().nullable().optional(),
+    canEdit: z.boolean().optional(),
     competitionMatchDurationMinutes: z.number(),
     homeTeam: z.object({
       id: z.string(),
@@ -217,6 +225,7 @@ const venuesResponse = z.object({
   data: z.array(
     z.object({
       id: z.string(),
+      createdById: z.string().nullable().optional(),
       name: z.string(),
       city: z.string(),
       country: z.string(),
@@ -285,6 +294,7 @@ const competitionDrawResponse = z.object({
   data: z.object({
     competition: z.object({
       id: z.string(),
+      createdById: z.string().nullable().optional(),
       name: z.string(),
       type: z.nativeEnum(CompetitionType),
       sport: z.nativeEnum(SportType),
@@ -336,6 +346,7 @@ const competitionDrawResponse = z.object({
         ),
       })
       .nullable(),
+    canManage: z.boolean().optional(),
   }),
 });
 
@@ -1047,3 +1058,4 @@ export function useMarkAllNotificationsRead() {
     },
   });
 }
+

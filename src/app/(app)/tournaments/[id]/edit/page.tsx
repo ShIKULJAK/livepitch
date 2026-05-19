@@ -6,7 +6,7 @@ import { CompetitionStatus, CompetitionType, SportType } from "@prisma/client";
 import { useCompetition, useTeams, useUpdateCompetition } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { SPORT_OPTIONS } from "@/lib/constants/sports";
-import { canManageTournaments } from "@/lib/permissions";
+import { canCreateCompetitions } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -54,8 +54,9 @@ export default function EditCompetitionPage() {
     participantTeamIds?: string[];
   }>({});
 
-  const canEdit = canManageTournaments(user?.role);
+  const canEditByRole = canCreateCompetitions(user?.role);
   const competition = competitionQuery.data;
+  const canEdit = canEditByRole && Boolean(competition?.canEdit);
   const participantTeamIds = draft.participantTeamIds ?? competition?.teams.map((entry) => entry.teamId) ?? [];
   const selectedSport = draft.sport ?? competition?.sport ?? SportType.FOOTBALL;
 
@@ -103,7 +104,7 @@ export default function EditCompetitionPage() {
   if (!canEdit) {
     return (
       <Card className="p-6 text-sm" style={{ color: "var(--danger)" }}>
-        You do not have permission to edit competitions.
+        You can only edit competitions that you created.
       </Card>
     );
   }

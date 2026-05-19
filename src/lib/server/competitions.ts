@@ -1,5 +1,6 @@
-﻿import { CompetitionStatus, CompetitionType, Prisma } from "@prisma/client";
+import { CompetitionStatus, CompetitionType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { canEditEntity } from "@/lib/permissions";
 import type { CreateCompetitionInput } from "@/lib/validation/competition";
 
 const defaultOrganizationName = "FC Champion";
@@ -49,6 +50,7 @@ export async function listCompetitions(
 
   return competitions.map((competition) => ({
     id: competition.id,
+    createdById: competition.createdById,
     name: competition.name,
     type: competition.type,
     status: competition.status,
@@ -92,7 +94,7 @@ function sanitizeCompetitionInput(input: CreateCompetitionInput) {
   };
 }
 
-export async function createCompetition(organizationId: string, input: CreateCompetitionInput) {
+export async function createCompetition(organizationId: string, createdById: string, input: CreateCompetitionInput) {
   const data = sanitizeCompetitionInput(input);
   const { participantTeamIds, ...competitionData } = data;
 
@@ -104,7 +106,7 @@ export async function createCompetition(organizationId: string, input: CreateCom
             organizationId,
             sport: competitionData.sport,
           },
-          select: { id: true },
+          select: { id: true, createdById: true },
         })
       : [];
 
@@ -114,6 +116,7 @@ export async function createCompetition(organizationId: string, input: CreateCom
       data: {
         ...competitionData,
         organizationId,
+        createdById,
         venueId: competitionData.venueId ?? null,
         seasonId: competitionData.seasonId ?? null,
         teams: validTeamIds.size
@@ -130,9 +133,10 @@ export async function createCompetition(organizationId: string, input: CreateCom
   });
 }
 
-export async function updateCompetition(id: string, organizationId: string, input: Partial<CreateCompetitionInput>) {
+export async function updateCompetition(id: string, organizationId: string, actor: { id: string; role: string }, input: Partial<CreateCompetitionInput>) {
   const current = await prisma.competition.findFirst({ where: { id, organizationId } });
   if (!current) return null;
+  if (!canEditEntity(actor, current)) throw new Error("Forbidden");
 
   const merged = sanitizeCompetitionInput({
     name: input.name ?? current.name,
@@ -172,7 +176,7 @@ export async function updateCompetition(id: string, organizationId: string, inpu
           organizationId,
           sport: competitionData.sport,
         },
-        select: { id: true },
+        select: { id: true, createdById: true },
       });
       const validTeamIds = new Set(validTeams.map((team) => team.id));
 
@@ -208,13 +212,14 @@ export async function getCompetitionById(organizationId: string, id: string) {
   });
 }
 
-export async function deleteCompetition(id: string, organizationId: string) {
+export async function deleteCompetition(id: string, organizationId: string, actor: { id: string; role: string }) {
   const existing = await prisma.competition.findFirst({
     where: { id, organizationId },
-    select: { id: true },
+    select: { id: true, createdById: true },
   });
 
   if (!existing) return null;
+  if (!canEditEntity(actor, existing)) throw new Error("Forbidden");
 
   return prisma.competition.delete({ where: { id: existing.id } });
 }
@@ -262,6 +267,7 @@ export async function listTeams(organizationId: string) {
     const standing = team.standings[0];
     return {
       id: team.id,
+      createdById: team.createdById,
       sport: team.sport,
       name: team.name,
       shortName: team.shortName,
@@ -290,6 +296,7 @@ export async function listPlayers(organizationId: string) {
 
   return players.map((player) => ({
     id: player.id,
+    createdById: player.createdById,
     sport: player.sport,
     firstName: player.firstName,
     lastName: player.lastName,
@@ -336,6 +343,7 @@ export async function listMatches(
 
   return matches.map((match) => ({
     id: match.id,
+    createdById: match.createdById,
     competitionId: match.competitionId,
     competition: match.competition.name,
     competitionType: match.competition.type,
@@ -539,3 +547,9 @@ export async function listStandings(organizationId: string, competitionId?: stri
     })),
   };
 }
+
+
+
+
+
+

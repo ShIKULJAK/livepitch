@@ -181,6 +181,7 @@ model Team {
   country        String?
   coach          String?
   profileImageUrl String?
+  createdById     String?
   organizationId String
   organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   players        Player[]
@@ -216,6 +217,7 @@ model Player {
   status       PlayerStatus @default(ACTIVE)
   dominantFoot DominantFoot @default(RIGHT)
   profileImageUrl String?
+  createdById    String?
   dateOfBirth  DateTime?
   teamId       String
   team         Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
@@ -245,6 +247,7 @@ model Competition {
   substitutions         Int?
   matchDurationMinutes  Int                @default(90)
   visibility            String?            @default("public")
+  createdById           String?
   organizationId        String
   organization          Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   seasonId              String?
@@ -303,6 +306,7 @@ model Match {
   homeScore        Int?
   awayScore        Int?
   regularTimeMinutes Int        @default(90)
+  createdById        String?
   liveMinute       Int?
   events           MatchEvent[]
   goalEvents       MatchGoalEvent[]
@@ -404,6 +408,7 @@ model MatchGoalEvent {
   minuteBase  Int
   minuteExtra Int?
   goalType    GoalType
+  createdById String?
   createdAt   DateTime @default(now())
 }
 
@@ -425,6 +430,7 @@ model MatchTeamStats {
   fouls            Int      @default(0)
   yellowCards      Int      @default(0)
   redCards         Int      @default(0)
+  createdById      String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -440,6 +446,7 @@ model Draw {
   roundOf16Enabled       Boolean             @default(false)
   quarterfinalsEnabled   Boolean             @default(true)
   thirdPlaceMatchEnabled Boolean             @default(false)
+  createdById            String?
   groups                 DrawGroup[]
   knockoutRounds         DrawKnockoutRound[]
   createdAt              DateTime            @default(now())

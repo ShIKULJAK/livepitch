@@ -14,7 +14,7 @@ import { Card } from "@/components/ui/card";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { Select } from "@/components/ui/select";
 import { useI18n } from "@/lib/i18n";
-import { canManageMatches } from "@/lib/permissions";
+import { canCreateMatches, canEditEntity } from "@/lib/permissions";
 import { formatDateDDMMYYYY, formatTimeStable } from "@/lib/utils/date";
 import { FavoriteButton } from "@/components/ui/favorite-button";
 
@@ -43,7 +43,7 @@ function MatchesPageContent() {
   const matchesQuery = useMatches({ status: statusFilter, competitionId });
   const deleteMatch = useDeleteMatch();
   const { user } = useCurrentUser();
-  const canManage = canManageMatches(user?.role);
+  const canManage = canCreateMatches(user?.role);
 
   const rows = useMemo(
     () => (matchesQuery.data ?? []).filter((match) => statusFilter === "ALL" || match.status === statusFilter),
@@ -114,6 +114,9 @@ function MatchesPageContent() {
             </thead>
             <tbody>
               {rows.map((match) => (
+                (() => {
+                  const canEditRow = canEditEntity(user, match);
+                  return (
                 <tr key={match.id} className="border-t" style={{ borderColor: "var(--border)" }}>
                   <td className="px-4 py-3">{formatTimeStable(match.scheduledAt)}</td>
                   <td className="px-4 py-3">
@@ -145,7 +148,7 @@ function MatchesPageContent() {
                       <Link href={`/matches/${match.id}`} style={{ color: "var(--primary)" }}>
                         {t("common.open")}
                       </Link>
-                      {canManage ? (
+                      {canEditRow ? (
                         <>
                           <Link href={`/matches/${match.id}/edit`} style={{ color: "var(--info)" }}>
                             Edit
@@ -166,6 +169,8 @@ function MatchesPageContent() {
                     </div>
                   </td>
                 </tr>
+                  );
+                })()
               ))}
             </tbody>
           </table>

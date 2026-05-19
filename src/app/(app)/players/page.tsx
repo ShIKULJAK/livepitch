@@ -11,14 +11,14 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
-import { canEditContent } from "@/lib/permissions";
+import { canCreatePlayers, canEditEntity } from "@/lib/permissions";
 
 export default function PlayersPage() {
   const { t } = useI18n();
   const playersQuery = usePlayers();
   const { user } = useCurrentUser();
   const [query, setQuery] = useState("");
-  const canCreate = canEditContent(user?.role);
+  const canCreate = canCreatePlayers(user?.role);
   const deletePlayer = useDeletePlayer();
 
   const rows = useMemo(
@@ -53,6 +53,9 @@ export default function PlayersPage() {
             </thead>
             <tbody>
               {rows.map((player) => (
+                (() => {
+                  const canEditRow = canEditEntity(user, player);
+                  return (
                 <tr key={player.id} className="border-t" style={{ borderColor: "var(--border)" }}>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
@@ -84,7 +87,7 @@ export default function PlayersPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <Link href={`/players/${player.id}`} style={{ color: "var(--primary)" }}>{t("common.open")}</Link>
-                      {canCreate ? (
+                      {canEditRow ? (
                         <>
                           <Link href={`/players/${player.id}/edit`} style={{ color: "var(--info)" }}>
                             Edit
@@ -105,6 +108,8 @@ export default function PlayersPage() {
                     </div>
                   </td>
                 </tr>
+                  );
+                })()
               ))}
             </tbody>
           </table>

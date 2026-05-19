@@ -1,4 +1,5 @@
 import { CompetitionType, DrawRoundType, DrawSourceType } from "@prisma/client";
+import { canEditEntity } from "@/lib/permissions";
 import { prisma } from "@/lib/db/prisma";
 import type { DrawConfigInput } from "@/lib/validation/draw";
 
@@ -144,6 +145,7 @@ export async function listDrawCompetitions(organizationId: string) {
 
   return competitions.map((competition) => ({
     id: competition.id,
+    createdById: competition.createdById,
     name: competition.name,
     type: competition.type,
     sport: competition.sport,
@@ -187,6 +189,7 @@ export async function getDrawByCompetition(organizationId: string, competitionId
   return {
     competition: {
       id: competition.id,
+      createdById: competition.createdById,
       name: competition.name,
       type: competition.type,
       sport: competition.sport,
@@ -197,9 +200,10 @@ export async function getDrawByCompetition(organizationId: string, competitionId
   };
 }
 
-export async function resetDraw(organizationId: string, competitionId: string) {
+export async function resetDraw(organizationId: string, actor: { id: string; role: string }, competitionId: string) {
   const competition = await ensureCompetition(organizationId, competitionId);
   if (!competition) return null;
+  if (!canEditEntity(actor, competition)) throw new Error("Forbidden");
   if (competition.type !== CompetitionType.TOURNAMENT) {
     return { ok: true };
   }
@@ -208,9 +212,15 @@ export async function resetDraw(organizationId: string, competitionId: string) {
   return { ok: true };
 }
 
-export async function generateDraw(organizationId: string, competitionId: string, config: DrawConfigInput) {
+export async function generateDraw(
+  organizationId: string,
+  actor: { id: string; role: string },
+  competitionId: string,
+  config: DrawConfigInput
+) {
   const competition = await ensureCompetition(organizationId, competitionId);
   if (!competition) return null;
+  if (!canEditEntity(actor, competition)) throw new Error("Forbidden");
   if (competition.type !== CompetitionType.TOURNAMENT) {
     throw new Error("Draw generation is available only for tournament competitions.");
   }
@@ -230,6 +240,7 @@ export async function generateDraw(organizationId: string, competitionId: string
     const draw = await tx.draw.create({
       data: {
         competitionId,
+        createdById: actor.id,
         groupStageEnabled: config.groupStageEnabled,
         groupsCount: config.groupStageEnabled ? config.groupsCount : 0,
         roundOf16Enabled: config.roundOf16Enabled,
@@ -392,3 +403,4 @@ export async function generateDraw(organizationId: string, competitionId: string
     return draw;
   });
 }
+

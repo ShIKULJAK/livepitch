@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useDeletePlayer, usePlayers } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import { canEditContent } from "@/lib/permissions";
+import { canCreatePlayers, canEditEntity } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -32,8 +32,8 @@ export default function PlayerDetailsPage() {
   const playersQuery = usePlayers();
   const deletePlayer = useDeletePlayer();
   const { user } = useCurrentUser();
-  const canEdit = canEditContent(user?.role);
   const player = (playersQuery.data ?? []).find((item) => item.id === params.id);
+  const canEdit = canCreatePlayers(user?.role) && canEditEntity(user, player);
   const infoRows = [
     { label: "Sport", value: player?.sport },
     {

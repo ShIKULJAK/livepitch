@@ -5,7 +5,7 @@ import { GoalType } from "@prisma/client";
 import { useParams } from "next/navigation";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useMatchDetails, useResetMatchDetails, useUpdateMatchDetails } from "@/hooks/use-competitions";
-import { canManageMatches } from "@/lib/permissions";
+import { canCreateMatches } from "@/lib/permissions";
 import { GOAL_TYPE_OPTIONS, TEAM_STAT_FIELDS, calculatePossessionPercentages, formatGoalMinute } from "@/lib/constants/match";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -99,7 +99,7 @@ const statTooltips: Record<string, string> = {
 export default function MatchDetailsPage() {
   const params = useParams<{ id: string }>();
   const { user } = useCurrentUser();
-  const canEdit = canManageMatches(user?.role);
+  const canEditByRole = canCreateMatches(user?.role);
   const matchDetailsQuery = useMatchDetails(params.id);
   const updateMatchDetails = useUpdateMatchDetails(params.id);
   const resetMatchDetails = useResetMatchDetails(params.id);
@@ -158,6 +158,8 @@ export default function MatchDetailsPage() {
       </Card>
     );
   }
+
+  const canEdit = canEditByRole && Boolean(matchDetailsQuery.data.canEdit);
 
   const homeTeam = matchDetailsQuery.data.homeTeam;
   const awayTeam = matchDetailsQuery.data.awayTeam;

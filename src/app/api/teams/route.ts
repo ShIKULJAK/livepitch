@@ -1,6 +1,6 @@
 ﻿import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { canManageTeams } from "@/lib/permissions";
+import { canCreateTeams } from "@/lib/permissions";
 import { createTeam as createTeamRecord } from "@/lib/repositories/teams";
 import { ImageProcessingError, processAndStoreProfileImage } from "@/lib/server/image-processing";
 import { listTeams } from "@/lib/server/competitions";
@@ -15,7 +15,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const currentUser = await requireAuth();
 
-  if (!canManageTeams(currentUser.role)) {
+  if (!canCreateTeams(currentUser.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid payload", issues: parsed.error.issues }, { status: 400 });
   }
 
-  const data = await createTeamRecord(currentUser.organizationId, parsed.data);
+  const data = await createTeamRecord(currentUser.organizationId, currentUser.id, parsed.data);
   return NextResponse.json({ data }, { status: 201 });
 }
 

@@ -6,7 +6,7 @@ import { SportType } from "@prisma/client";
 import { useTeams, useUpdateTeam } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { SPORT_OPTIONS } from "@/lib/constants/sports";
-import { canManageTeams } from "@/lib/permissions";
+import { canCreateTeams, canEditEntity } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -20,9 +20,10 @@ export default function EditTeamPage() {
   const { user } = useCurrentUser();
   const teamsQuery = useTeams();
   const updateTeam = useUpdateTeam(params.id);
-  const canEdit = canManageTeams(user?.role);
+  const canEditByRole = canCreateTeams(user?.role);
 
   const team = (teamsQuery.data ?? []).find((item) => item.id === params.id);
+  const canEdit = canEditByRole && canEditEntity(user, team);
 
   const [draft, setDraft] = useState<{
     sport?: SportType;
@@ -60,7 +61,7 @@ export default function EditTeamPage() {
   if (!canEdit) {
     return (
       <Card className="p-6 text-sm" style={{ color: "var(--danger)" }}>
-        You do not have permission to edit teams.
+        You can only edit teams that you created.
       </Card>
     );
   }

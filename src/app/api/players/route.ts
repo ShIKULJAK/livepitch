@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { canEditContent } from "@/lib/permissions";
+import { canCreatePlayers } from "@/lib/permissions";
 import { createPlayer as createPlayerRecord } from "@/lib/repositories/players";
 import { ImageProcessingError, processAndStoreProfileImage } from "@/lib/server/image-processing";
 import { listPlayers } from "@/lib/server/competitions";
@@ -15,7 +15,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const currentUser = await requireAuth();
 
-  if (!canEditContent(currentUser.role)) {
+  if (!canCreatePlayers(currentUser.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -65,7 +65,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid payload", issues: parsed.error.issues }, { status: 400 });
   }
 
-  const data = await createPlayerRecord(currentUser.organizationId, parsed.data);
+  const data = await createPlayerRecord(currentUser.organizationId, currentUser.id, parsed.data);
   return NextResponse.json({ data }, { status: 201 });
 }
-

@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
@@ -10,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { AuthProgress } from "@/components/ui/auth-progress";
 
 export default function SignupPage() {
-  const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -41,19 +39,22 @@ export default function SignupPage() {
         return;
       }
 
+      const callbackUrlParam = new URLSearchParams(window.location.search).get("callbackUrl");
       const signInResult = await signIn("credentials", {
         email,
         password,
+        callbackUrl: callbackUrlParam
+          ? new URL(callbackUrlParam, window.location.origin).toString()
+          : new URL("/dashboard", window.location.origin).toString(),
         redirect: false,
       });
 
-      if (signInResult?.error) {
-        router.replace("/login");
+      if (!signInResult || signInResult.error || !signInResult.ok) {
+        window.location.assign("/login");
         return;
       }
 
-      router.replace("/dashboard");
-      router.refresh();
+      window.location.assign(signInResult.url ?? "/dashboard");
     } catch {
       setError("Signup failed. Please try again.");
     } finally {

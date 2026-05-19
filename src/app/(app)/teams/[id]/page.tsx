@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useDeleteTeam, useTeams } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import { canManageTeams } from "@/lib/permissions";
+import { canCreateTeams, canEditEntity } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -30,8 +30,8 @@ export default function TeamDetailsPage() {
   const teamsQuery = useTeams();
   const deleteTeam = useDeleteTeam();
   const { user } = useCurrentUser();
-  const canEdit = canManageTeams(user?.role);
   const team = (teamsQuery.data ?? []).find((item) => item.id === params.id);
+  const canEdit = canCreateTeams(user?.role) && canEditEntity(user, team);
   const location = [team?.city, team?.country].filter(Boolean).join(", ");
   const infoRows = [
     { label: "Sport", value: team?.sport },

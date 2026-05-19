@@ -5,7 +5,7 @@ import { DominantFoot, PlayerStatus, SportType } from "@prisma/client";
 import { useParams, useRouter } from "next/navigation";
 import { usePlayers, useTeams, useUpdatePlayer } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import { canEditContent } from "@/lib/permissions";
+import { canCreatePlayers, canEditEntity } from "@/lib/permissions";
 import { SPORT_OPTIONS } from "@/lib/constants/sports";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -39,8 +39,9 @@ export default function EditPlayerPage() {
   const playersQuery = usePlayers();
   const teamsQuery = useTeams();
   const updatePlayer = useUpdatePlayer(params.id);
-  const canEdit = canEditContent(user?.role);
+  const canEditByRole = canCreatePlayers(user?.role);
   const player = (playersQuery.data ?? []).find((item) => item.id === params.id);
+  const canEdit = canEditByRole && canEditEntity(user, player);
 
   const [draft, setDraft] = useState<{
     sport?: SportType;
@@ -112,7 +113,7 @@ export default function EditPlayerPage() {
   if (!canEdit) {
     return (
       <Card className="p-6 text-sm" style={{ color: "var(--danger)" }}>
-        You do not have permission to edit players.
+        You can only edit players that you created.
       </Card>
     );
   }

@@ -15,6 +15,13 @@ type RoundMatchSeed = {
   order: number;
 };
 
+type GroupFixtureSeed = {
+  drawGroupId: string;
+  groupName: string;
+  homeTeamId: string;
+  awayTeamId: string;
+};
+
 function shuffle<T>(items: T[]) {
   const copy = [...items];
   for (let i = copy.length - 1; i > 0; i -= 1) {
@@ -47,6 +54,21 @@ function distributeParticipants(teams: Participant[], groupsCount: number) {
   return groups;
 }
 
+function createGroupFixtures(groupId: string, groupName: string, teamIds: string[]) {
+  const fixtures: GroupFixtureSeed[] = [];
+  for (let i = 0; i < teamIds.length; i += 1) {
+    for (let j = i + 1; j < teamIds.length; j += 1) {
+      fixtures.push({
+        drawGroupId: groupId,
+        groupName,
+        homeTeamId: teamIds[i],
+        awayTeamId: teamIds[j],
+      });
+    }
+  }
+  return fixtures;
+}
+
 function createRoundPairs(
   winners: Array<{ sourceType: DrawSourceType; sourceValue: string }>,
   runners: Array<{ sourceType: DrawSourceType; sourceValue: string }>,
@@ -63,17 +85,17 @@ function createRoundPairs(
   while (pairs.length < matchCount && winners.length > index + 1 && runners.length > index + 1) {
     pairs.push({
       homeSourceType: winners[index].sourceType,
-      homeSourceValue: winners[index].sourceValue,
+      homeSourceValue: `${winners[index].sourceValue}1`,
       awaySourceType: runners[index + 1].sourceType,
-      awaySourceValue: runners[index + 1].sourceValue,
+      awaySourceValue: `${runners[index + 1].sourceValue}2`,
     });
 
     if (pairs.length < matchCount) {
       pairs.push({
         homeSourceType: winners[index + 1].sourceType,
-        homeSourceValue: winners[index + 1].sourceValue,
+        homeSourceValue: `${winners[index + 1].sourceValue}1`,
         awaySourceType: runners[index].sourceType,
-        awaySourceValue: runners[index].sourceValue,
+        awaySourceValue: `${runners[index].sourceValue}2`,
       });
     }
     index += 2;
@@ -214,6 +236,13 @@ export async function resetDraw(organizationId: string, actor: { id: string; rol
     return { ok: true };
   }
 
+  await prisma.match.deleteMany({
+    where: {
+      competitionId,
+      stage: "GROUP_STAGE",
+      drawId: { not: null },
+    },
+  });
   await prisma.draw.deleteMany({ where: { competitionId } });
   return { ok: true };
 }
@@ -240,6 +269,22 @@ export async function generateDraw(
     throw new Error("Groups count cannot exceed participants count.");
   }
 
+  const existingDraw = await prisma.draw.findUnique({ where: { competitionId } });
+  if (existingDraw) {
+    throw new Error("Draw already exists for this competition. Reset draw before regenerating.");
+  }
+
+  const existingGeneratedGroupMatches = await prisma.match.count({
+    where: {
+      competitionId,
+      stage: "GROUP_STAGE",
+      drawId: { not: null },
+    },
+  });
+  if (existingGeneratedGroupMatches > 0) {
+    throw new Error("Group-stage matches already exist. Reset draw before regenerating.");
+  }
+
   await prisma.draw.deleteMany({ where: { competitionId } });
 
   return prisma.$transaction(async (tx) => {
@@ -255,7 +300,7 @@ export async function generateDraw(
       },
     });
 
-    const createdGroups: Array<{ id: string; name: string }> = [];
+    const createdGroups: Array<{ id: string; name: string; teamIds: string[] }> = [];
     if (config.groupStageEnabled) {
       const groups = distributeParticipants(participants, config.groupsCount);
       for (let index = 0; index < groups.length; index += 1) {
@@ -263,7 +308,11 @@ export async function generateDraw(
         const createdGroup = await tx.drawGroup.create({
           data: { drawId: draw.id, name: group.name, order: index + 1 },
         });
-        createdGroups.push({ id: createdGroup.id, name: createdGroup.name });
+        createdGroups.push({
+          id: createdGroup.id,
+          name: createdGroup.name,
+          teamIds: group.teams.map((team) => team.id),
+        });
 
         if (group.teams.length) {
           await tx.drawGroupTeam.createMany({
@@ -274,6 +323,30 @@ export async function generateDraw(
             })),
           });
         }
+      }
+    }
+
+    if (config.groupStageEnabled) {
+      const placeholderBaseDate = competition.startDate ?? new Date();
+      const fixtures = createdGroups.flatMap((group) => createGroupFixtures(group.id, group.name, group.teamIds));
+      for (let index = 0; index < fixtures.length; index += 1) {
+        const fixture = fixtures[index];
+        await tx.match.create({
+          data: {
+            competitionId: competition.id,
+            seasonId: competition.seasonId ?? null,
+            drawId: draw.id,
+            drawGroupId: fixture.drawGroupId,
+            stage: "GROUP_STAGE",
+            round: `Group ${fixture.groupName}`,
+            homeTeamId: fixture.homeTeamId,
+            awayTeamId: fixture.awayTeamId,
+            status: "SCHEDULED",
+            scheduledAt: new Date(placeholderBaseDate.getTime() + index * 60 * 60 * 1000),
+            regularTimeMinutes: competition.matchDurationMinutes,
+            createdById: actor.id,
+          },
+        });
       }
     }
 

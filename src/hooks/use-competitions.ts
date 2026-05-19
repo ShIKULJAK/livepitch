@@ -829,6 +829,7 @@ export function useUpdateMatchDetails(matchId: string) {
       queryClient.invalidateQueries({ queryKey: ["matches"] });
       queryClient.invalidateQueries({ queryKey: ["match-details", matchId] });
       queryClient.invalidateQueries({ queryKey: ["standings"] });
+      queryClient.invalidateQueries({ queryKey: ["competition-draw"] });
     },
   });
 }
@@ -890,6 +891,7 @@ export function useUpdateMatch(matchId: string) {
       queryClient.invalidateQueries({ queryKey: ["matches"] });
       queryClient.invalidateQueries({ queryKey: ["match-details", matchId] });
       queryClient.invalidateQueries({ queryKey: ["standings"] });
+      queryClient.invalidateQueries({ queryKey: ["competition-draw"] });
     },
   });
 }

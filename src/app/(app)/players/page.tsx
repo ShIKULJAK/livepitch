@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import Link from "next/link";
-import { useDeletePlayer, usePlayers } from "@/hooks/use-competitions";
+import { useDeletePlayer, usePlayers, useTeams } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -13,17 +13,62 @@ import { useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { canCreatePlayers, canEditEntity } from "@/lib/permissions";
 
+function getPlayerInitials(firstName?: string | null, lastName?: string | null, fullName?: string | null) {
+  const fn = firstName?.trim();
+  const ln = lastName?.trim();
+  if (fn && ln) return `${fn[0]}${ln[0]}`.toUpperCase();
+
+  const parts = (fullName ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+  }
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return "IG";
+}
+
 export default function PlayersPage() {
   const { t } = useI18n();
   const playersQuery = usePlayers();
+  const teamsQuery = useTeams();
   const { user } = useCurrentUser();
   const [query, setQuery] = useState("");
+  const [teamFilter, setTeamFilter] = useState<string>("ALL");
+  const [positionFilter, setPositionFilter] = useState<string>("ALL");
   const canCreate = canCreatePlayers(user?.role);
   const deletePlayer = useDeletePlayer();
 
+  const teamOptions = useMemo(
+    () =>
+      (teamsQuery.data ?? [])
+        .map((team) => ({ id: team.id, name: team.name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [teamsQuery.data]
+  );
+
+  const positionOptions = useMemo(
+    () =>
+      Array.from(
+        new Set((playersQuery.data ?? []).map((player) => player.position.trim()).filter((position) => position.length > 0))
+      ).sort((a, b) => a.localeCompare(b)),
+    [playersQuery.data]
+  );
+
   const rows = useMemo(
-    () => (playersQuery.data ?? []).filter((player) => player.fullName.toLowerCase().includes(query.toLowerCase())),
-    [playersQuery.data, query]
+    () =>
+      (playersQuery.data ?? []).filter((player) => {
+        const matchesQuery = player.fullName.toLowerCase().includes(query.toLowerCase().trim());
+        const matchesTeam = teamFilter === "ALL" || player.teamId === teamFilter;
+        const matchesPosition = positionFilter === "ALL" || player.position === positionFilter;
+        return matchesQuery && matchesTeam && matchesPosition;
+      }),
+    [playersQuery.data, query, teamFilter, positionFilter, teamsQuery.data]
   );
 
   return (
@@ -41,8 +86,22 @@ export default function PlayersPage() {
       />
       <FilterBar>
         <Input placeholder={t("common.search")} className="max-w-sm" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
-        <Select className="w-44"><option>All Teams</option></Select>
-        <Select className="w-44"><option>All Positions</option></Select>
+        <Select className="w-44" value={teamFilter} onChange={(event) => setTeamFilter(event.currentTarget.value)}>
+          <option value="ALL">All Teams</option>
+          {teamOptions.map((team) => (
+            <option key={team.id} value={team.id}>
+              {team.name}
+            </option>
+          ))}
+        </Select>
+        <Select className="w-44" value={positionFilter} onChange={(event) => setPositionFilter(event.currentTarget.value)}>
+          <option value="ALL">All Positions</option>
+          {positionOptions.map((position) => (
+            <option key={position} value={position}>
+              {position}
+            </option>
+          ))}
+        </Select>
       </FilterBar>
 
       <Card className="overflow-hidden">
@@ -74,7 +133,7 @@ export default function PlayersPage() {
                           className="inline-flex h-8 w-8 items-center justify-center rounded-full border text-xs font-semibold"
                           style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}
                         >
-                          {`${player.firstName?.[0] ?? ""}${player.lastName?.[0] ?? ""}`.toUpperCase() || player.fullName.slice(0, 2).toUpperCase()}
+                          {getPlayerInitials(player.firstName, player.lastName, player.fullName)}
                         </span>
                       )}
                       <span className="font-medium">{player.fullName}</span>

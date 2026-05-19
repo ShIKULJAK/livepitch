@@ -309,6 +309,11 @@ model Match {
   id               String       @id @default(cuid())
   competitionId    String
   competition      Competition  @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  drawId           String?
+  draw             Draw?        @relation(fields: [drawId], references: [id], onDelete: SetNull)
+  drawGroupId      String?
+  drawGroup        DrawGroup?   @relation(fields: [drawGroupId], references: [id], onDelete: SetNull)
+  stage            String?
   seasonId         String?
   season           Season?      @relation(fields: [seasonId], references: [id], onDelete: SetNull)
   homeTeamId       String
@@ -330,6 +335,8 @@ model Match {
   teamStats        MatchTeamStats[]
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
+
+  @@index([competitionId, stage, drawId])
 }
 
 model MatchEvent {
@@ -466,6 +473,7 @@ model Draw {
   createdById            String?
   groups                 DrawGroup[]
   knockoutRounds         DrawKnockoutRound[]
+  matches                Match[]
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
 
@@ -479,6 +487,7 @@ model DrawGroup {
   name     String
   order    Int
   teams    DrawGroupTeam[]
+  matches  Match[]
 
   @@unique([drawId, name])
 }

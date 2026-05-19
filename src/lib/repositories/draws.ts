@@ -122,6 +122,7 @@ async function ensureCompetition(organizationId: string, competitionId: string) 
   const competition = await prisma.competition.findFirst({
     where: { id: competitionId, organizationId },
     include: {
+      season: { select: { id: true, name: true } },
       teams: {
         include: { team: { select: { id: true, name: true, sport: true } } },
       },
@@ -137,6 +138,7 @@ export async function listDrawCompetitions(organizationId: string) {
   const competitions = await prisma.competition.findMany({
     where: { organizationId },
     include: {
+      season: { select: { id: true, name: true } },
       teams: { include: { team: { select: { id: true, name: true } } } },
       draws: { select: { id: true, updatedAt: true } },
     },
@@ -148,6 +150,8 @@ export async function listDrawCompetitions(organizationId: string) {
     createdById: competition.createdById,
     name: competition.name,
     type: competition.type,
+    seasonId: competition.seasonId,
+    seasonLabel: competition.season?.name ?? null,
     sport: competition.sport,
     status: competition.status,
     participantsCount: competition.teams.length,
@@ -193,6 +197,8 @@ export async function getDrawByCompetition(organizationId: string, competitionId
       name: competition.name,
       type: competition.type,
       sport: competition.sport,
+      seasonId: competition.seasonId,
+      seasonLabel: competition.season?.name ?? null,
       matchDurationMinutes: competition.matchDurationMinutes,
       participants: competition.teams.map((entry) => entry.team),
     },

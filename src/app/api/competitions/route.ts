@@ -12,6 +12,7 @@ export async function GET(request: Request) {
     q: searchParams.get("q") ?? undefined,
     type: searchParams.get("type") ?? undefined,
     status: searchParams.get("status") ?? undefined,
+    seasonYear: searchParams.get("seasonYear") ?? undefined,
   });
 
   if (!parsed.success) {

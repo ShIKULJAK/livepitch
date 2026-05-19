@@ -5,6 +5,7 @@ export const competitionQuerySchema = z.object({
   q: z.string().optional(),
   type: z.nativeEnum(CompetitionType).optional(),
   status: z.nativeEnum(CompetitionStatus).optional(),
+  seasonYear: z.string().regex(/^\d{4}$/).optional(),
 });
 
 export const createCompetitionSchema = z.object({
@@ -28,6 +29,12 @@ export const createCompetitionSchema = z.object({
   entryFee: z.number().min(0).max(999999).optional().nullable(),
   venueId: z.string().optional().nullable(),
   seasonId: z.string().optional().nullable(),
+  seasonLabel: z
+    .string()
+    .trim()
+    .min(2)
+    .max(40)
+    .regex(/^(\d{4}(\/\d{4})?)$/, "Season must be in format YYYY or YYYY/YYYY"),
   participantTeamIds: z.array(z.string().min(1)).max(256).default([]),
 });
 

@@ -62,7 +62,10 @@ export default function CompetitionDrawPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title={`Izvlacenje - ${competition.name}`} description={`Participants: ${competition.participants.length} - Match duration: ${competition.matchDurationMinutes} min`} />
+      <PageHeader
+        title={`Izvlacenje - ${competition.name}`}
+        description={`Season: ${competition.seasonLabel ?? "N/A"} - Participants: ${competition.participants.length} - Match duration: ${competition.matchDurationMinutes} min`}
+      />
 
       <Card className="space-y-3 p-5">
         <h3 className="text-lg font-semibold">Participants</h3>

@@ -14,7 +14,7 @@ type MatchDetailsUpdate = z.infer<typeof matchDetailsUpdateSchema>;
 async function assertCompetitionOwnership(organizationId: string, competitionId: string) {
   return prisma.competition.findFirst({
     where: { id: competitionId, organizationId },
-    select: { id: true, matchDurationMinutes: true, createdById: true },
+    select: { id: true, seasonId: true, matchDurationMinutes: true, createdById: true },
   });
 }
 
@@ -40,7 +40,7 @@ async function resolveCompetitionForCreate(organizationId: string, competitionId
       sport: homeTeam.sport,
       name: "Friendly Game",
     },
-    select: { id: true, matchDurationMinutes: true },
+    select: { id: true, seasonId: true, matchDurationMinutes: true },
   });
 
   if (existingFriendlyCompetition) return existingFriendlyCompetition;
@@ -57,7 +57,7 @@ async function resolveCompetitionForCreate(organizationId: string, competitionId
       matchDurationMinutes: 90,
       visibility: "public",
     },
-    select: { id: true, matchDurationMinutes: true },
+    select: { id: true, seasonId: true, matchDurationMinutes: true },
   });
 }
 
@@ -67,6 +67,7 @@ export async function createMatch(organizationId: string, actorId: string, input
   return prisma.match.create({
     data: {
       competitionId: competition.id,
+      seasonId: competition.seasonId ?? null,
       homeTeamId: input.homeTeamId,
       awayTeamId: input.awayTeamId,
       venueId: input.venueId ?? null,
@@ -91,10 +92,18 @@ export async function updateMatch(organizationId: string, actor: { id: string; r
   if (!existing) return null;
   if (!canEditEntity(actor, existing)) throw new Error("Forbidden");
 
+  const nextCompetitionId = input.competitionId ?? undefined;
+  const nextCompetition =
+    nextCompetitionId !== undefined
+      ? await assertCompetitionOwnership(organizationId, nextCompetitionId)
+      : null;
+  if (nextCompetitionId !== undefined && !nextCompetition) throw new Error("Forbidden");
+
   const updated = await prisma.match.update({
     where: { id: existing.id },
     data: {
       ...(input.competitionId !== undefined ? { competitionId: input.competitionId } : {}),
+      ...(nextCompetition ? { seasonId: nextCompetition.seasonId ?? null } : {}),
       ...(input.homeTeamId !== undefined ? { homeTeamId: input.homeTeamId } : {}),
       ...(input.awayTeamId !== undefined ? { awayTeamId: input.awayTeamId } : {}),
       ...(input.venueId !== undefined ? { venueId: input.venueId } : {}),
@@ -104,7 +113,11 @@ export async function updateMatch(organizationId: string, actor: { id: string; r
       ...(input.homeScore !== undefined ? { homeScore: input.homeScore } : {}),
       ...(input.awayScore !== undefined ? { awayScore: input.awayScore } : {}),
       ...(input.liveMinute !== undefined ? { liveMinute: input.liveMinute } : {}),
-      ...(input.regularTimeMinutes !== undefined ? { regularTimeMinutes: input.regularTimeMinutes } : {}),
+      ...(input.regularTimeMinutes !== undefined
+        ? { regularTimeMinutes: input.regularTimeMinutes }
+        : nextCompetition
+          ? { regularTimeMinutes: nextCompetition.matchDurationMinutes }
+          : {}),
     },
   });
 

@@ -1,9 +1,9 @@
 ﻿"use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CompetitionStatus, CompetitionType } from "@prisma/client";
 import { FavoriteTargetType } from "@prisma/client";
-import { useDeleteCompetition, useCompetitions } from "@/hooks/use-competitions";
+import { useCompetitionSeasons, useDeleteCompetition, useCompetitions } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useI18n } from "@/lib/i18n";
 import { canCreateCompetitions, canEditEntity } from "@/lib/permissions";
@@ -36,13 +36,37 @@ function formatDateRange(startDate?: string | null, endDate?: string | null) {
   return `${start} - ${end}`;
 }
 
+function seasonYearLabel(label?: string | null) {
+  if (!label) return "No season";
+  const range = label.match(/^(\d{4})\/\d{4}$/);
+  if (range) return range[1];
+  const single = label.match(/^(\d{4})$/);
+  if (single) return single[1];
+  return label;
+}
+
 export default function TournamentsPage() {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
+  const [seasonYear, setSeasonYear] = useState<string>("ALL");
   const [type, setType] = useState<CompetitionType | "ALL">("ALL");
   const [status, setStatus] = useState<CompetitionStatus | "ALL">("ALL");
+  const seasonsQuery = useCompetitionSeasons();
+  const didApplyDefaultSeason = useRef(false);
 
-  const filters = useMemo(() => ({ q: query || undefined, type, status }), [query, type, status]);
+  useEffect(() => {
+    if (!seasonsQuery.data) return;
+    if (didApplyDefaultSeason.current) return;
+    const currentYear = String(new Date().getFullYear());
+    const hasCurrentYear = seasonsQuery.data.years.some((entry) => entry.year === currentYear);
+    if (hasCurrentYear) setSeasonYear(currentYear);
+    didApplyDefaultSeason.current = true;
+  }, [seasonsQuery.data]);
+
+  const filters = useMemo(
+    () => ({ q: query || undefined, type, status, season: seasonYear !== "ALL" ? seasonYear : undefined }),
+    [query, type, status, seasonYear]
+  );
   const competitionsQuery = useCompetitions(filters);
   const deleteCompetition = useDeleteCompetition();
   const { user } = useCurrentUser();
@@ -63,6 +87,18 @@ export default function TournamentsPage() {
       />
 
       <FilterBar>
+        <Select
+          className="w-56 border-[color:var(--primary)]"
+          value={seasonYear}
+          onChange={(event) => setSeasonYear(event.currentTarget.value)}
+        >
+          <option value="ALL">All seasons</option>
+          {seasonsQuery.data?.years.map((season) => (
+            <option key={season.year} value={season.year}>
+              {season.year}
+            </option>
+          ))}
+        </Select>
         <Input placeholder={t("common.search")} value={query} onChange={(event) => setQuery(event.currentTarget.value)} className="max-w-sm" />
         <Select className="w-52" value={type} onChange={(event) => setType(event.currentTarget.value as CompetitionType | "ALL")}>
               {typeOptions.map((option) => (
@@ -111,7 +147,7 @@ export default function TournamentsPage() {
                 </span>
               </div>
               <p className="mt-2 text-sm" style={{ color: "var(--text-secondary)" }}>
-                {item.location} • {formatDateRange(item.startDate ?? null, item.endDate ?? null)}
+                {seasonYearLabel(item.seasonLabel)} • {item.location} • {formatDateRange(item.startDate ?? null, item.endDate ?? null)}
               </p>
               <div className="mt-2 flex flex-wrap gap-4 text-sm">
                 <span>{item.teamsCount} {t("tournaments.teams")}</span>

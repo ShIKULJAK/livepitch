@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { CompetitionStatus, CompetitionType, SportType } from "@prisma/client";
-import { useCompetition, useTeams, useUpdateCompetition } from "@/hooks/use-competitions";
+import { useCompetition, useSeasonSquads, useTeams, useUpdateCompetition, useUpdateSeasonSquad } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { SPORT_OPTIONS } from "@/lib/constants/sports";
 import { canCreateCompetitions } from "@/lib/permissions";
@@ -30,12 +30,17 @@ export default function EditCompetitionPage() {
   const { user } = useCurrentUser();
   const competitionQuery = useCompetition(params.id);
   const teamsQuery = useTeams();
+  const seasonSquadsQuery = useSeasonSquads(params.id);
+  const updateSeasonSquad = useUpdateSeasonSquad(params.id);
   const updateCompetition = useUpdateCompetition(params.id);
   const [teamSearch, setTeamSearch] = useState("");
+  const [selectedSeasonTeamId, setSelectedSeasonTeamId] = useState<string | null>(null);
+  const [squadDraft, setSquadDraft] = useState<Record<string, string[]>>({});
   const [draft, setDraft] = useState<{
     name?: string;
     type?: CompetitionType;
     sport?: SportType;
+    seasonLabel?: string;
     location?: string;
     startDate?: string;
     endDate?: string;
@@ -65,6 +70,12 @@ export default function EditCompetitionPage() {
       (teamsQuery.data ?? []).filter((team) => team.sport === selectedSport && team.name.toLowerCase().includes(teamSearch.toLowerCase())),
     [teamsQuery.data, selectedSport, teamSearch]
   );
+  const seasonTeams = seasonSquadsQuery.data?.teams ?? [];
+  const activeSeasonTeamId = selectedSeasonTeamId ?? seasonTeams[0]?.teamId ?? null;
+  const activeSeasonTeam = seasonTeams.find((team) => team.teamId === activeSeasonTeamId) ?? null;
+  const activeRegistered = activeSeasonTeam
+    ? squadDraft[activeSeasonTeam.teamId] ?? activeSeasonTeam.registeredPlayerIds
+    : [];
 
   function toggleParticipant(teamId: string) {
     const next = participantTeamIds.includes(teamId)
@@ -79,6 +90,7 @@ export default function EditCompetitionPage() {
 
     await updateCompetition.mutateAsync({
       name: draft.name ?? competition.name,
+      seasonLabel: draft.seasonLabel ?? competition.season?.name ?? "",
       type: draft.type ?? competition.type,
       sport: selectedSport,
       location: (draft.location ?? competition.location ?? "") || null,
@@ -109,6 +121,19 @@ export default function EditCompetitionPage() {
     );
   }
 
+  function toggleSeasonPlayer(playerId: string) {
+    if (!activeSeasonTeam) return;
+    const current = squadDraft[activeSeasonTeam.teamId] ?? activeSeasonTeam.registeredPlayerIds;
+    const next = current.includes(playerId) ? current.filter((id) => id !== playerId) : [...current, playerId];
+    setSquadDraft((state) => ({ ...state, [activeSeasonTeam.teamId]: next }));
+  }
+
+  async function saveSeasonSquad() {
+    if (!activeSeasonTeam) return;
+    const playerIds = squadDraft[activeSeasonTeam.teamId] ?? activeSeasonTeam.registeredPlayerIds;
+    await updateSeasonSquad.mutateAsync({ teamId: activeSeasonTeam.teamId, playerIds });
+  }
+
   if (competitionQuery.isLoading) {
     return <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>Loading competition...</Card>;
   }
@@ -121,6 +146,23 @@ export default function EditCompetitionPage() {
     <div className="space-y-4">
       <PageHeader title={`Edit ${competition.name}`} description="Update competition settings, participants, and duration." />
       <Card className="p-6">
+        {competition.seasonOptions?.length ? (
+          <FormField label="Season Edition" tooltip="Switch to another season edition of the same competition.">
+            <Select
+              value={competition.id}
+              onChange={(event) => {
+                const targetCompetitionId = event.currentTarget.value;
+                router.push(`/tournaments/${targetCompetitionId}/edit`);
+              }}
+            >
+              {competition.seasonOptions.map((option) => (
+                <option key={option.competitionId} value={option.competitionId}>
+                  {option.seasonLabel ?? "No season"}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        ) : null}
         <form className="grid gap-3 md:grid-cols-2" onSubmit={(event) => void onSubmit(event)}>
           <FormField label="Competition Name" tooltip="Official competition title." required>
             <Input
@@ -159,6 +201,16 @@ export default function EditCompetitionPage() {
                 </option>
               ))}
             </Select>
+          </FormField>
+          <FormField label="Season" tooltip="Defines the season/edition of this competition, for example 2025/2026." required>
+            <Input
+              value={draft.seasonLabel ?? competition.season?.name ?? ""}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setDraft((current) => ({ ...current, seasonLabel: value }));
+              }}
+              required
+            />
           </FormField>
           <FormField label="Match Duration" tooltip="Regular match time in minutes." required>
             <Input
@@ -323,7 +375,7 @@ export default function EditCompetitionPage() {
           </FormField>
           <div className="space-y-2 md:col-span-2">
             <FormField label="Participants" tooltip="Select teams by selected sport for this competition.">
-              <Input placeholder="Search teams..." value={teamSearch} onChange={(event) => setTeamSearch(event.target.value)} />
+              <Input placeholder="Search teams..." value={teamSearch} onChange={(event) => setTeamSearch(event.currentTarget.value)} />
             </FormField>
             <div className="max-h-44 space-y-1 overflow-auto rounded-xl border p-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
               {availableTeams.map((team) => (
@@ -353,6 +405,59 @@ export default function EditCompetitionPage() {
             </Button>
           </div>
         </form>
+      </Card>
+      <Card className="space-y-3 p-6">
+        <h3 className="text-lg font-semibold">Season Team Player Registrations</h3>
+        <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+          Register players manually for this season edition. Only registered players are considered active in this competition season.
+        </p>
+        <div className="grid gap-3 md:grid-cols-[240px_1fr]">
+          <div className="space-y-2 rounded-xl border p-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
+            {seasonTeams.map((team) => (
+              <button
+                key={team.teamId}
+                type="button"
+                className="w-full rounded-lg px-2 py-1.5 text-left text-sm"
+                style={
+                  team.teamId === activeSeasonTeamId
+                    ? { backgroundColor: "color-mix(in srgb,var(--primary) 16%, transparent)", color: "var(--text-primary)" }
+                    : { color: "var(--text-secondary)" }
+                }
+                onClick={() => setSelectedSeasonTeamId(team.teamId)}
+              >
+                {team.teamName}
+              </button>
+            ))}
+          </div>
+          <div className="space-y-2 rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
+            {activeSeasonTeam ? (
+              <>
+                <p className="text-sm font-medium">{activeSeasonTeam.teamName}</p>
+                <div className="max-h-72 space-y-1 overflow-auto">
+                  {activeSeasonTeam.players.map((player) => (
+                    <label key={player.id} className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm">
+                      <span>{player.fullName}</span>
+                      <input
+                        type="checkbox"
+                        checked={activeRegistered.includes(player.id)}
+                        onChange={() => toggleSeasonPlayer(player.id)}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <div className="flex justify-end">
+                  <Button onClick={() => void saveSeasonSquad()} disabled={updateSeasonSquad.isPending}>
+                    {updateSeasonSquad.isPending ? "Saving..." : "Save Squad"}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                No season participants available.
+              </p>
+            )}
+          </div>
+        </div>
       </Card>
     </div>
   );

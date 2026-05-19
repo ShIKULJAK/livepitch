@@ -43,6 +43,7 @@ const defaults: CompetitionFormValues = {
   teamSize: 11,
   substitutions: 5,
   matchDurationMinutes: 90,
+  seasonLabel: `${new Date().getFullYear()}/${new Date().getFullYear() + 1}`,
   participantTeamIds: [],
   format: "Knockout + Group Stage",
   visibility: "public",
@@ -81,6 +82,7 @@ export default function CreateTournamentPage() {
   const watchedStatus = useWatch({ control: form.control, name: "status" });
   const watchedFormat = useWatch({ control: form.control, name: "format" });
   const watchedSport = useWatch({ control: form.control, name: "sport" });
+  const watchedSeasonLabel = useWatch({ control: form.control, name: "seasonLabel" });
   const participantTeamIds = useWatch({ control: form.control, name: "participantTeamIds" }) ?? [];
   const [teamSearch, setTeamSearch] = useState("");
 
@@ -91,6 +93,7 @@ export default function CreateTournamentPage() {
   const reviewItems = [
     ["Name", watchedName],
     ["Type", t(`competition.type.${competitionType}`)],
+    ["Season", watchedSeasonLabel],
     ["Location", watchedLocation || "TBD"],
     ["Dates", `${watchedStartDate || "?"} - ${watchedEndDate || "?"}`],
     ["Status", t(`competition.status.${watchedStatus}`)],
@@ -211,6 +214,14 @@ export default function CreateTournamentPage() {
                     </option>
                   ))}
                 </Select>
+              </FormField>
+              <FormField
+                label="Season"
+                tooltip="Defines the season/edition of this competition, for example 2025/2026."
+                required
+                error={form.formState.errors.seasonLabel?.message}
+              >
+                <Input placeholder="e.g. 2026/2027" {...form.register("seasonLabel")} />
               </FormField>
               <FormField label="Start Date" tooltip="Competition start date.">
                 <Input type="date" {...form.register("startDateInput")} />

@@ -22,7 +22,7 @@ export async function ensureDefaultOrganization() {
 
 export async function listCompetitions(
   organizationId: string,
-  filters: { q?: string; type?: CompetitionType; status?: CompetitionStatus }
+  filters: { q?: string; type?: CompetitionType; status?: CompetitionStatus; seasonYear?: string }
 ) {
   const where: Prisma.CompetitionWhereInput = {
     organizationId,
@@ -36,12 +36,23 @@ export async function listCompetitions(
       : {}),
     ...(filters.type ? { type: filters.type } : {}),
     ...(filters.status ? { status: filters.status } : {}),
+    ...(filters.seasonYear
+      ? {
+          season: {
+            OR: [
+              { name: filters.seasonYear },
+              { name: { startsWith: `${filters.seasonYear}/` } },
+            ],
+          },
+        }
+      : {}),
   };
 
   const competitions = await prisma.competition.findMany({
     where,
     include: {
       venue: true,
+      season: { select: { id: true, name: true } },
       matches: { select: { id: true, status: true } },
       teams: true,
     },
@@ -60,11 +71,135 @@ export async function listCompetitions(
     startDate: competition.startDate,
     endDate: competition.endDate,
     matchDurationMinutes: competition.matchDurationMinutes,
+    seasonId: competition.seasonId,
+    seasonLabel: competition.season?.name ?? null,
     teamsCount: competition.teams.length || competition.teamCount || 0,
     matchesCount: competition.matches.length,
     liveMatches: competition.matches.filter((match) => match.status === "LIVE").length,
     createdAt: competition.createdAt,
   }));
+}
+
+function inferSeasonWindow(label: string) {
+  const range = label.match(/^(\d{4})\/(\d{4})$/);
+  if (range) {
+    const startYear = Number(range[1]);
+    const endYear = Number(range[2]);
+    return {
+      startDate: new Date(Date.UTC(startYear, 6, 1, 0, 0, 0, 0)),
+      endDate: new Date(Date.UTC(endYear, 5, 30, 23, 59, 59, 999)),
+    };
+  }
+
+  const single = label.match(/^(\d{4})$/);
+  if (single) {
+    const year = Number(single[1]);
+    return {
+      startDate: new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0)),
+      endDate: new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999)),
+    };
+  }
+
+  return null;
+}
+
+function inferSeasonStartYear(label: string) {
+  const range = label.match(/^(\d{4})\/\d{4}$/);
+  if (range) return range[1];
+  const single = label.match(/^(\d{4})$/);
+  if (single) return single[1];
+  return null;
+}
+
+export async function listCompetitionSeasons(organizationId: string) {
+  const now = new Date();
+  const seasons = await prisma.season.findMany({
+    where: {
+      organizationId,
+      competitions: { some: {} },
+    },
+    include: {
+      _count: { select: { competitions: true } },
+    },
+    orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
+  });
+
+  const withWindows = seasons.map((season) => {
+    const inferred = inferSeasonWindow(season.name);
+    const startDate = season.startDate ?? inferred?.startDate ?? null;
+    const endDate = season.endDate ?? inferred?.endDate ?? null;
+    const isActive = Boolean(startDate && endDate && startDate <= now && now <= endDate);
+    return { season, startDate, endDate, isActive };
+  });
+
+  const active = withWindows
+    .filter((item) => item.isActive)
+    .sort((a, b) => (b.startDate?.getTime() ?? 0) - (a.startDate?.getTime() ?? 0));
+
+  const fallbackNewest = [...withWindows].sort((a, b) => {
+    const aTime = a.startDate?.getTime() ?? 0;
+    const bTime = b.startDate?.getTime() ?? 0;
+    if (bTime !== aTime) return bTime - aTime;
+    return b.season.createdAt.getTime() - a.season.createdAt.getTime();
+  });
+
+  const defaultSeason = active[0] ?? fallbackNewest[0] ?? null;
+
+  const yearsMap = new Map<
+    string,
+    {
+      year: string;
+      isActive: boolean;
+      competitionsCount: number;
+      latestStart: number;
+      latestEnd: number;
+    }
+  >();
+
+  for (const item of withWindows) {
+    const year = inferSeasonStartYear(item.season.name);
+    if (!year) continue;
+    const prev = yearsMap.get(year);
+    const startTs = item.startDate?.getTime() ?? 0;
+    const endTs = item.endDate?.getTime() ?? 0;
+    if (!prev) {
+      yearsMap.set(year, {
+        year,
+        isActive: item.isActive,
+        competitionsCount: item.season._count.competitions,
+        latestStart: startTs,
+        latestEnd: endTs,
+      });
+      continue;
+    }
+    yearsMap.set(year, {
+      year,
+      isActive: prev.isActive || item.isActive,
+      competitionsCount: prev.competitionsCount + item.season._count.competitions,
+      latestStart: Math.max(prev.latestStart, startTs),
+      latestEnd: Math.max(prev.latestEnd, endTs),
+    });
+  }
+
+  const years = Array.from(yearsMap.values()).sort((a, b) => Number(b.year) - Number(a.year));
+  const defaultYear = defaultSeason ? inferSeasonStartYear(defaultSeason.season.name) : null;
+
+  return {
+    defaultSeasonYear: defaultYear,
+    years: years.map((item) => ({
+      year: item.year,
+      isActive: item.isActive,
+      competitionsCount: item.competitionsCount,
+    })),
+    seasons: withWindows.map((item) => ({
+      id: item.season.id,
+      label: item.season.name,
+      startDate: item.startDate,
+      endDate: item.endDate,
+      competitionsCount: item.season._count.competitions,
+      isActive: item.isActive,
+    })),
+  };
 }
 
 function sanitizeCompetitionInput(input: CreateCompetitionInput) {
@@ -91,14 +226,63 @@ function sanitizeCompetitionInput(input: CreateCompetitionInput) {
     matchDurationMinutes: input.matchDurationMinutes ?? 90,
     visibility: input.visibility ?? "public",
     participantTeamIds,
+    seasonLabel: input.seasonLabel.trim(),
   };
+}
+
+async function resolveOrCreateSeason(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  seasonLabel: string,
+  startDate?: Date | null,
+  endDate?: Date | null
+) {
+  const existing = await tx.season.findFirst({
+    where: { organizationId, name: seasonLabel },
+    select: { id: true, name: true },
+  });
+  if (existing) return existing;
+
+  const defaultStart = startDate ?? new Date(`${seasonLabel.slice(0, 4)}-01-01T00:00:00.000Z`);
+  const defaultEnd = endDate ?? new Date(`${seasonLabel.slice(0, 4)}-12-31T23:59:59.999Z`);
+
+  return tx.season.create({
+    data: {
+      organizationId,
+      name: seasonLabel,
+      startDate: defaultStart,
+      endDate: defaultEnd,
+    },
+    select: { id: true, name: true },
+  });
 }
 
 export async function createCompetition(organizationId: string, createdById: string, input: CreateCompetitionInput) {
   const data = sanitizeCompetitionInput(input);
-  const { participantTeamIds, ...competitionData } = data;
+  const { participantTeamIds, seasonLabel, ...competitionData } = data;
 
   return prisma.$transaction(async (tx) => {
+    const season = await resolveOrCreateSeason(
+      tx,
+      organizationId,
+      seasonLabel,
+      competitionData.startDate,
+      competitionData.endDate
+    );
+    const duplicate = await tx.competition.findFirst({
+      where: {
+        organizationId,
+        name: competitionData.name,
+        sport: competitionData.sport,
+        type: competitionData.type,
+        seasonId: season.id,
+      },
+      select: { id: true },
+    });
+    if (duplicate) {
+      throw new Error("Competition for this season already exists.");
+    }
+
     const validTeams = participantTeamIds.length
       ? await tx.team.findMany({
           where: {
@@ -118,7 +302,7 @@ export async function createCompetition(organizationId: string, createdById: str
         organizationId,
         createdById,
         venueId: competitionData.venueId ?? null,
-        seasonId: competitionData.seasonId ?? null,
+        seasonId: season.id,
         teams: validTeamIds.size
           ? {
               createMany: {
@@ -159,12 +343,39 @@ export async function updateCompetition(id: string, organizationId: string, acto
     entryFee: input.entryFee ?? (current.entryFee ? Number(current.entryFee) : null),
     venueId: input.venueId ?? current.venueId,
     seasonId: input.seasonId ?? current.seasonId,
+    seasonLabel: input.seasonLabel ?? (await prisma.season.findUnique({ where: { id: current.seasonId ?? "" }, select: { name: true } }))?.name ?? "2026",
     participantTeamIds: input.participantTeamIds ?? [],
   });
-  const { participantTeamIds = [], ...competitionData } = merged;
+  const { participantTeamIds = [], seasonLabel, ...competitionData } = merged;
 
   return prisma.$transaction(async (tx) => {
-    const updatedCompetition = await tx.competition.update({ where: { id }, data: competitionData, include: { teams: true } });
+    const season = await resolveOrCreateSeason(
+      tx,
+      organizationId,
+      seasonLabel,
+      competitionData.startDate,
+      competitionData.endDate
+    );
+    const duplicate = await tx.competition.findFirst({
+      where: {
+        id: { not: id },
+        organizationId,
+        name: competitionData.name,
+        sport: competitionData.sport,
+        type: competitionData.type,
+        seasonId: season.id,
+      },
+      select: { id: true },
+    });
+    if (duplicate) {
+      throw new Error("Competition for this season already exists.");
+    }
+
+    const updatedCompetition = await tx.competition.update({
+      where: { id },
+      data: { ...competitionData, seasonId: season.id },
+      include: { teams: true },
+    });
     if (competitionData.type !== "TOURNAMENT") {
       await tx.draw.deleteMany({ where: { competitionId: id } });
     }
@@ -198,9 +409,10 @@ export async function updateCompetition(id: string, organizationId: string, acto
 }
 
 export async function getCompetitionById(organizationId: string, id: string) {
-  return prisma.competition.findFirst({
+  const competition = await prisma.competition.findFirst({
     where: { organizationId, id },
     include: {
+      season: { select: { id: true, name: true } },
       teams: {
         include: {
           team: {
@@ -210,6 +422,27 @@ export async function getCompetitionById(organizationId: string, id: string) {
       },
     },
   });
+  if (!competition) return null;
+
+  const seasons = await prisma.competition.findMany({
+    where: {
+      organizationId,
+      name: competition.name,
+      type: competition.type,
+      sport: competition.sport,
+    },
+    include: { season: { select: { id: true, name: true } } },
+    orderBy: [{ season: { name: "desc" } }, { createdAt: "desc" }],
+  });
+
+  return {
+    ...competition,
+    seasonOptions: seasons.map((entry) => ({
+      competitionId: entry.id,
+      seasonId: entry.seasonId,
+      seasonLabel: entry.season?.name ?? null,
+    })),
+  };
 }
 
 export async function deleteCompetition(id: string, organizationId: string, actor: { id: string; role: string }) {
@@ -333,7 +566,7 @@ export async function listMatches(
       ...(filters?.competitionId ? { competitionId: filters.competitionId } : {}),
     },
     include: {
-      competition: true,
+      competition: { include: { season: { select: { id: true, name: true } } } },
       homeTeam: true,
       awayTeam: true,
       venue: true,
@@ -346,6 +579,8 @@ export async function listMatches(
     createdById: match.createdById,
     competitionId: match.competitionId,
     competition: match.competition.name,
+    seasonId: match.competition.seasonId,
+    seasonLabel: match.competition.season?.name ?? null,
     competitionType: match.competition.type,
     round: match.round,
     scheduledAt: match.scheduledAt,
@@ -360,6 +595,93 @@ export async function listMatches(
     regularTimeMinutes: match.regularTimeMinutes,
     venue: match.venue?.name ?? "TBD",
   }));
+}
+
+export async function getSeasonTeamPlayerRegistrations(organizationId: string, competitionId: string) {
+  const competition = await prisma.competition.findFirst({
+    where: { id: competitionId, organizationId },
+    include: {
+      teams: {
+        include: {
+          team: {
+            include: {
+              players: {
+                select: { id: true, fullName: true, sport: true, teamId: true },
+                orderBy: { fullName: "asc" },
+              },
+            },
+          },
+        },
+      },
+      season: { select: { id: true, name: true } },
+    },
+  });
+  if (!competition) return null;
+
+  const registrations = await prisma.competitionSeasonTeamPlayer.findMany({
+    where: { competitionId },
+    select: { teamId: true, playerId: true },
+  });
+  const map = new Map<string, Set<string>>();
+  for (const registration of registrations) {
+    const set = map.get(registration.teamId) ?? new Set<string>();
+    set.add(registration.playerId);
+    map.set(registration.teamId, set);
+  }
+
+  return {
+    competitionId: competition.id,
+    competitionName: competition.name,
+    seasonLabel: competition.season?.name ?? null,
+    teams: competition.teams.map((entry) => ({
+      teamId: entry.teamId,
+      teamName: entry.team.name,
+      players: entry.team.players.map((player) => ({
+        id: player.id,
+        fullName: player.fullName,
+      })),
+      registeredPlayerIds: Array.from(map.get(entry.teamId) ?? []),
+    })),
+  };
+}
+
+export async function saveSeasonTeamPlayerRegistrations(
+  organizationId: string,
+  competitionId: string,
+  actor: { id: string; role: string },
+  teamId: string,
+  playerIds: string[]
+) {
+  const competition = await prisma.competition.findFirst({
+    where: { id: competitionId, organizationId },
+    select: { id: true, createdById: true },
+  });
+  if (!competition) return null;
+  if (!canEditEntity(actor, competition)) throw new Error("Forbidden");
+
+  const participant = await prisma.competitionTeam.findFirst({
+    where: { competitionId, teamId },
+    select: { teamId: true },
+  });
+  if (!participant) throw new Error("Team is not a participant in this season.");
+
+  const validPlayers = await prisma.player.findMany({
+    where: { id: { in: playerIds }, teamId },
+    select: { id: true },
+  });
+  const validIds = new Set(validPlayers.map((player) => player.id));
+
+  await prisma.$transaction(async (tx) => {
+    await tx.competitionSeasonTeamPlayer.deleteMany({ where: { competitionId, teamId } });
+    if (validIds.size) {
+      await tx.competitionSeasonTeamPlayer.createMany({
+        data: Array.from(validIds).map((playerId) => ({ competitionId, teamId, playerId })),
+        skipDuplicates: true,
+      });
+    }
+  });
+
+  return { ok: true };
 }
 
 export async function listVenues(organizationId: string) {

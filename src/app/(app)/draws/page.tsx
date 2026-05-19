@@ -39,7 +39,7 @@ export default function DrawsPage() {
                 )}
               </div>
               <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>
-                {competition.sport} - {competition.participantsCount} participants
+                {competition.seasonLabel ?? "No season"} - {competition.sport} - {competition.participantsCount} participants
               </p>
             </div>
             <Link href={`/draws/${competition.id}`}>

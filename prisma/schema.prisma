@@ -188,6 +188,7 @@ model Team {
   homeMatches    Match[]            @relation("HomeTeam")
   awayMatches    Match[]            @relation("AwayTeam")
   competitions   CompetitionTeam[]
+  seasonPlayers  CompetitionSeasonTeamPlayer[]
   standings      Standing[]
   registrations  Registration[]
   events         MatchEvent[]
@@ -223,6 +224,7 @@ model Player {
   team         Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
   matchEvents  MatchEvent[]
   goalEvents   MatchGoalEvent[]
+  seasonRegistrations CompetitionSeasonTeamPlayer[]
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 }
@@ -255,6 +257,7 @@ model Competition {
   venueId               String?
   venue                 Venue?             @relation(fields: [venueId], references: [id], onDelete: SetNull)
   teams                 CompetitionTeam[]
+  seasonTeamPlayers     CompetitionSeasonTeamPlayer[]
   matches               Match[]
   groups                CompetitionGroup[]
   standings             Standing[]
@@ -275,6 +278,20 @@ model CompetitionTeam {
   team           Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@unique([competitionId, teamId])
+}
+
+model CompetitionSeasonTeamPlayer {
+  id            String      @id @default(cuid())
+  competitionId String
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  teamId        String
+  team          Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  playerId      String
+  player        Player      @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+
+  @@unique([competitionId, teamId, playerId])
+  @@index([competitionId, teamId])
 }
 
 model CompetitionGroup {

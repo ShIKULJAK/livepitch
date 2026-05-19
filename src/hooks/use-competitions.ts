@@ -33,6 +33,8 @@ const competitionListResponse = z.object({
       matchesCount: z.number(),
       liveMatches: z.number(),
       matchDurationMinutes: z.number(),
+      seasonId: z.string().nullable().optional(),
+      seasonLabel: z.string().nullable().optional(),
       startDate: z.string().datetime().nullable().optional(),
       endDate: z.string().datetime().nullable().optional(),
     })
@@ -58,6 +60,17 @@ const competitionDetailsResponse = z.object({
     teamSize: z.number().nullable(),
     substitutions: z.number().nullable(),
     matchDurationMinutes: z.number(),
+    seasonId: z.string().nullable(),
+    season: z.object({ id: z.string(), name: z.string() }).nullable().optional(),
+    seasonOptions: z
+      .array(
+        z.object({
+          competitionId: z.string(),
+          seasonId: z.string().nullable(),
+          seasonLabel: z.string().nullable(),
+        })
+      )
+      .optional(),
     format: z.string().nullable(),
     visibility: z.string().nullable(),
     entryFee: z.union([z.number(), z.string(), z.null()]).nullable(),
@@ -145,6 +158,8 @@ const matchesResponse = z.object({
       competitionId: z.string(),
       competition: z.string(),
       competitionType: z.nativeEnum(CompetitionType),
+      seasonId: z.string().nullable().optional(),
+      seasonLabel: z.string().nullable().optional(),
       round: z.string().nullable(),
       scheduledAt: z.string().datetime(),
       status: z.nativeEnum(MatchStatus),
@@ -280,6 +295,8 @@ const drawCompetitionsResponse = z.object({
       id: z.string(),
       name: z.string(),
       type: z.nativeEnum(CompetitionType),
+      seasonId: z.string().nullable().optional(),
+      seasonLabel: z.string().nullable().optional(),
       sport: z.nativeEnum(SportType),
       status: z.nativeEnum(CompetitionStatus),
       participantsCount: z.number(),
@@ -298,6 +315,8 @@ const competitionDrawResponse = z.object({
       name: z.string(),
       type: z.nativeEnum(CompetitionType),
       sport: z.nativeEnum(SportType),
+      seasonId: z.string().nullable().optional(),
+      seasonLabel: z.string().nullable().optional(),
       matchDurationMinutes: z.number(),
       participants: z.array(z.object({ id: z.string(), name: z.string() })),
     }),
@@ -426,7 +445,7 @@ const notificationsResponse = z.object({
   }),
 });
 
-export function useCompetitions(filters: { q?: string; type?: CompetitionType | "ALL"; status?: CompetitionStatus | "ALL" }) {
+export function useCompetitions(filters: { q?: string; type?: CompetitionType | "ALL"; status?: CompetitionStatus | "ALL"; season?: string }) {
   return useQuery({
     queryKey: ["competitions", filters],
     queryFn: async () => {
@@ -434,11 +453,93 @@ export function useCompetitions(filters: { q?: string; type?: CompetitionType | 
       if (filters.q) params.set("q", filters.q);
       if (filters.type && filters.type !== "ALL") params.set("type", filters.type);
       if (filters.status && filters.status !== "ALL") params.set("status", filters.status);
+      if (filters.season) params.set("seasonYear", filters.season);
 
       const response = await fetch(`/api/competitions?${params.toString()}`);
       if (!response.ok) throw new Error("Failed to load competitions");
       const json = await response.json();
       return competitionListResponse.parse(json).data;
+    },
+  });
+}
+
+const competitionSeasonsResponse = z.object({
+  data: z.object({
+    defaultSeasonYear: z.string().nullable(),
+    years: z.array(
+      z.object({
+        year: z.string(),
+        isActive: z.boolean(),
+        competitionsCount: z.number(),
+      })
+    ),
+    seasons: z.array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        startDate: z.string().datetime().nullable(),
+        endDate: z.string().datetime().nullable(),
+        competitionsCount: z.number(),
+        isActive: z.boolean(),
+      })
+    ),
+  }),
+});
+
+export function useCompetitionSeasons() {
+  return useQuery({
+    queryKey: ["competition-seasons"],
+    queryFn: async () => {
+      const response = await fetch("/api/competitions/seasons");
+      if (!response.ok) throw new Error("Failed to load competition seasons");
+      return competitionSeasonsResponse.parse(await response.json()).data;
+    },
+  });
+}
+
+const seasonSquadsResponse = z.object({
+  data: z.object({
+    competitionId: z.string(),
+    competitionName: z.string(),
+    seasonLabel: z.string().nullable(),
+    teams: z.array(
+      z.object({
+        teamId: z.string(),
+        teamName: z.string(),
+        players: z.array(z.object({ id: z.string(), fullName: z.string() })),
+        registeredPlayerIds: z.array(z.string()),
+      })
+    ),
+  }),
+});
+
+export function useSeasonSquads(competitionId?: string) {
+  return useQuery({
+    queryKey: ["season-squads", competitionId],
+    enabled: Boolean(competitionId),
+    queryFn: async () => {
+      const response = await fetch(`/api/competitions/${competitionId}/season-squads`);
+      if (!response.ok) throw new Error("Failed to load season squads");
+      return seasonSquadsResponse.parse(await response.json()).data;
+    },
+  });
+}
+
+export function useUpdateSeasonSquad(competitionId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { teamId: string; playerIds: string[] }) => {
+      const response = await fetch(`/api/competitions/${competitionId}/season-squads`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await safeReadJson(response);
+      if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to save season squad");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["season-squads", competitionId] });
     },
   });
 }

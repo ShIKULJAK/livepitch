@@ -29,6 +29,7 @@ export default function EditTeamPage() {
     sport?: SportType;
     name?: string;
     shortName?: string;
+    place?: string;
     city?: string;
     country?: string;
     coach?: string;
@@ -49,6 +50,7 @@ export default function EditTeamPage() {
     formData.set("sport", draft.sport ?? team.sport);
     formData.set("name", draft.name ?? team.name);
     formData.set("shortName", draft.shortName ?? team.shortName ?? "");
+    formData.set("place", draft.place ?? team.place ?? "");
     formData.set("city", draft.city ?? team.city ?? "");
     formData.set("country", draft.country ?? team.country ?? "");
     formData.set("coach", draft.coach ?? team.coach ?? "");
@@ -80,7 +82,7 @@ export default function EditTeamPage() {
       <Card className="p-6">
         <form className="grid gap-3 md:grid-cols-2" onSubmit={(event) => void onSubmit(event)}>
           <FormField label="Sport" tooltip="Sport category for this team." required>
-            <Select value={draft.sport ?? team.sport} onChange={(event) => setDraft((current) => ({ ...current, sport: event.target.value as SportType }))}>
+            <Select value={draft.sport ?? team.sport} onChange={(event) => setDraft((current) => ({ ...current, sport: event.target.value as SportType }))} required>
               {SPORT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -91,17 +93,22 @@ export default function EditTeamPage() {
           <FormField label="Team Name" tooltip="Official full team name." required>
             <Input value={draft.name ?? team.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} required />
           </FormField>
-          <FormField label="Short Name" tooltip="Compact short team name.">
-            <Input value={draft.shortName ?? team.shortName ?? ""} onChange={(event) => setDraft((current) => ({ ...current, shortName: event.target.value }))} />
+          <FormField label="Short Name" tooltip="Compact short team name." required>
+            <Input value={draft.shortName ?? team.shortName ?? ""} onChange={(event) => setDraft((current) => ({ ...current, shortName: event.target.value }))} required />
           </FormField>
-          <FormField label="City" tooltip="Home city of team.">
-            <Input value={draft.city ?? team.city ?? ""} onChange={(event) => setDraft((current) => ({ ...current, city: event.target.value }))} />
+          <div className="grid gap-3 md:grid-cols-2 md:col-start-2">
+            <FormField label="City" tooltip="Home city of team." required>
+              <Input value={draft.city ?? team.city ?? ""} onChange={(event) => setDraft((current) => ({ ...current, city: event.target.value }))} required />
+            </FormField>
+            <FormField label="Mjesto" tooltip="Naselje/selo/manje mjesto odakle je ekipa.">
+              <Input value={draft.place ?? team.place ?? ""} onChange={(event) => setDraft((current) => ({ ...current, place: event.target.value }))} />
+            </FormField>
+          </div>
+          <FormField label="Country" tooltip="Home country of team." required>
+            <Input value={draft.country ?? team.country ?? ""} onChange={(event) => setDraft((current) => ({ ...current, country: event.target.value }))} required />
           </FormField>
-          <FormField label="Country" tooltip="Home country of team.">
-            <Input value={draft.country ?? team.country ?? ""} onChange={(event) => setDraft((current) => ({ ...current, country: event.target.value }))} />
-          </FormField>
-          <FormField label="Coach" tooltip="Head coach of the team.">
-            <Input value={draft.coach ?? team.coach ?? ""} onChange={(event) => setDraft((current) => ({ ...current, coach: event.target.value }))} />
+          <FormField label="Coach" tooltip="Head coach of the team." required>
+            <Input value={draft.coach ?? team.coach ?? ""} onChange={(event) => setDraft((current) => ({ ...current, coach: event.target.value }))} required />
           </FormField>
           <div className="space-y-2 md:col-span-2">
             {team.profileImageUrl ? (

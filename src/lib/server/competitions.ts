@@ -71,6 +71,9 @@ export async function listCompetitions(
     startDate: competition.startDate,
     endDate: competition.endDate,
     matchDurationMinutes: competition.matchDurationMinutes,
+    stadiumName: competition.stadiumName,
+    pitchNames: competition.pitchNames,
+    scheduleDays: normalizeScheduleDays(competition.scheduleDays),
     seasonId: competition.seasonId,
     seasonLabel: competition.season?.name ?? null,
     teamsCount: competition.teams.length || competition.teamCount || 0,
@@ -205,6 +208,9 @@ export async function listCompetitionSeasons(organizationId: string) {
 function sanitizeCompetitionInput(input: CreateCompetitionInput) {
   const parseDate = (value?: string | null) => (value ? new Date(value) : null);
   const participantTeamIds = Array.from(new Set(input.participantTeamIds ?? []));
+  const normalizedPitchNames = Array.from(
+    new Set((input.pitchNames ?? ["Teren 1"]).map((name) => name.trim()).filter(Boolean))
+  );
 
   return {
     ...input,
@@ -224,10 +230,40 @@ function sanitizeCompetitionInput(input: CreateCompetitionInput) {
     teamSize: input.type === "FRIENDLY_MATCH" ? 11 : input.teamSize ?? null,
     substitutions: input.type === "FRIENDLY_MATCH" ? 5 : input.substitutions ?? null,
     matchDurationMinutes: input.matchDurationMinutes ?? 90,
+    stadiumName: input.stadiumName.trim(),
+    pitchNames: normalizedPitchNames.length ? normalizedPitchNames : ["Teren 1"],
+    scheduleDays: (input.scheduleDays ?? []).map((day) => ({
+      dayLabel: day.dayLabel.trim(),
+      generationLabel: day.generationLabel,
+      pitchId: day.pitchId ?? null,
+      startTime: day.startTime,
+      endTime: day.endTime,
+    })),
     visibility: input.visibility ?? "public",
     participantTeamIds,
     seasonLabel: input.seasonLabel.trim(),
   };
+}
+
+type ScheduleDayRaw = { dayLabel?: string; generationLabel?: string; pitchId?: string | null; startTime?: string; endTime?: string };
+
+function normalizeScheduleDays(value: unknown) {
+  const fallback = [{ dayLabel: "Dan 1", generationLabel: "Generacija 2018", pitchId: null, startTime: "09:00", endTime: "19:00" }];
+  if (!Array.isArray(value)) return fallback;
+
+  const normalized = value
+    .map((day) => day as ScheduleDayRaw)
+    .filter((day) => typeof day.dayLabel === "string" && typeof day.startTime === "string" && typeof day.endTime === "string")
+    .map((day) => ({
+      dayLabel: day.dayLabel!.trim(),
+      generationLabel:
+        typeof day.generationLabel === "string" && day.generationLabel.trim().length > 0 ? day.generationLabel : "Generacija 2018",
+      pitchId: typeof day.pitchId === "string" && day.pitchId.trim().length > 0 ? day.pitchId : null,
+      startTime: day.startTime!,
+      endTime: day.endTime!,
+    }));
+
+  return normalized.length ? normalized : fallback;
 }
 
 async function resolveOrCreateSeason(
@@ -337,6 +373,9 @@ export async function updateCompetition(id: string, organizationId: string, acto
     teamSize: input.teamSize ?? current.teamSize,
     substitutions: input.substitutions ?? current.substitutions,
     matchDurationMinutes: input.matchDurationMinutes ?? current.matchDurationMinutes,
+    stadiumName: input.stadiumName ?? current.stadiumName ?? "Stadion",
+    pitchNames: input.pitchNames ?? current.pitchNames,
+    scheduleDays: input.scheduleDays ?? normalizeScheduleDays(current.scheduleDays),
     format: input.format ?? current.format,
     visibility: input.visibility ?? current.visibility,
     status: input.status ?? current.status,
@@ -437,6 +476,7 @@ export async function getCompetitionById(organizationId: string, id: string) {
 
   return {
     ...competition,
+    scheduleDays: normalizeScheduleDays(competition.scheduleDays),
     seasonOptions: seasons.map((entry) => ({
       competitionId: entry.id,
       seasonId: entry.seasonId,
@@ -504,6 +544,7 @@ export async function listTeams(organizationId: string) {
       sport: team.sport,
       name: team.name,
       shortName: team.shortName,
+      place: team.place,
       city: team.city,
       country: team.country,
       coach: team.coach,
@@ -593,7 +634,9 @@ export async function listMatches(
     awayScore: match.awayScore,
     liveMinute: match.liveMinute,
     regularTimeMinutes: match.regularTimeMinutes,
-    venue: match.venue?.name ?? "TBD",
+    venue: match.venueLabel ?? match.venue?.name ?? "TBD",
+    venueLabel: match.venueLabel ?? null,
+    pitchName: match.pitchName ?? null,
   }));
 }
 
@@ -687,8 +730,153 @@ export async function saveSeasonTeamPlayerRegistrations(
 export async function listVenues(organizationId: string) {
   return prisma.venue.findMany({
     where: { organizationId },
+    include: {
+      pitches: {
+        where: { isActive: true },
+        orderBy: [{ venueId: "asc" }, { name: "asc" }],
+      },
+    },
     orderBy: { name: "asc" },
   });
+}
+
+export async function createVenue(
+  organizationId: string,
+  input: {
+    name: string;
+    city?: string | null;
+    country?: string | null;
+    capacity?: number | null;
+    surface?: string | null;
+    dimensions?: string | null;
+    lighting?: boolean;
+    accessibility?: string | null;
+  }
+) {
+  return prisma.venue.create({
+    data: {
+      organizationId,
+      name: input.name,
+      city: input.city ?? "N/A",
+      country: input.country ?? "N/A",
+      capacity: input.capacity ?? null,
+      surface: input.surface ?? null,
+      dimensions: input.dimensions ?? null,
+      lighting: input.lighting ?? true,
+      accessibility: input.accessibility ?? null,
+      status: "active",
+    },
+  });
+}
+
+export async function updateVenue(
+  organizationId: string,
+  venueId: string,
+  input: {
+    name?: string;
+    city?: string | null;
+    country?: string | null;
+    capacity?: number | null;
+    surface?: string | null;
+    dimensions?: string | null;
+    lighting?: boolean;
+    accessibility?: string | null;
+  }
+) {
+  const existing = await prisma.venue.findFirst({ where: { id: venueId, organizationId }, select: { id: true } });
+  if (!existing) return null;
+  return prisma.venue.update({
+    where: { id: existing.id },
+    data: {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.city !== undefined ? { city: input.city ?? "N/A" } : {}),
+      ...(input.country !== undefined ? { country: input.country ?? "N/A" } : {}),
+      ...(input.capacity !== undefined ? { capacity: input.capacity } : {}),
+      ...(input.surface !== undefined ? { surface: input.surface } : {}),
+      ...(input.dimensions !== undefined ? { dimensions: input.dimensions } : {}),
+      ...(input.lighting !== undefined ? { lighting: input.lighting } : {}),
+      ...(input.accessibility !== undefined ? { accessibility: input.accessibility } : {}),
+    },
+  });
+}
+
+export async function deleteVenue(organizationId: string, venueId: string) {
+  const existing = await prisma.venue.findFirst({ where: { id: venueId, organizationId }, select: { id: true } });
+  if (!existing) return null;
+  return prisma.venue.delete({ where: { id: existing.id } });
+}
+
+export async function createPitch(
+  organizationId: string,
+  input: {
+    venueId?: string | null;
+    name: string;
+    generationLabel?: string | null;
+    ageGroupCode?: string | null;
+    playerFormat: string;
+    fieldLengthMeters: number;
+    fieldWidthMeters: number;
+    goalWidthMeters?: number | null;
+    goalHeightMeters?: number | null;
+    isActive?: boolean;
+  }
+) {
+  return prisma.pitch.create({
+    data: {
+      organizationId,
+      venueId: input.venueId ?? null,
+      name: input.name,
+      generationLabel: input.generationLabel ?? null,
+      ageGroupCode: input.ageGroupCode ?? null,
+      playerFormat: input.playerFormat,
+      fieldLengthMeters: input.fieldLengthMeters,
+      fieldWidthMeters: input.fieldWidthMeters,
+      goalWidthMeters: input.goalWidthMeters ?? null,
+      goalHeightMeters: input.goalHeightMeters ?? null,
+      isActive: input.isActive ?? true,
+    },
+  });
+}
+
+export async function updatePitch(
+  organizationId: string,
+  pitchId: string,
+  input: {
+    venueId?: string | null;
+    name?: string;
+    generationLabel?: string | null;
+    ageGroupCode?: string | null;
+    playerFormat?: string;
+    fieldLengthMeters?: number;
+    fieldWidthMeters?: number;
+    goalWidthMeters?: number | null;
+    goalHeightMeters?: number | null;
+    isActive?: boolean;
+  }
+) {
+  const existing = await prisma.pitch.findFirst({ where: { id: pitchId, organizationId }, select: { id: true } });
+  if (!existing) return null;
+  return prisma.pitch.update({
+    where: { id: existing.id },
+    data: {
+      ...(input.venueId !== undefined ? { venueId: input.venueId } : {}),
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.generationLabel !== undefined ? { generationLabel: input.generationLabel } : {}),
+      ...(input.ageGroupCode !== undefined ? { ageGroupCode: input.ageGroupCode } : {}),
+      ...(input.playerFormat !== undefined ? { playerFormat: input.playerFormat } : {}),
+      ...(input.fieldLengthMeters !== undefined ? { fieldLengthMeters: input.fieldLengthMeters } : {}),
+      ...(input.fieldWidthMeters !== undefined ? { fieldWidthMeters: input.fieldWidthMeters } : {}),
+      ...(input.goalWidthMeters !== undefined ? { goalWidthMeters: input.goalWidthMeters } : {}),
+      ...(input.goalHeightMeters !== undefined ? { goalHeightMeters: input.goalHeightMeters } : {}),
+      ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+    },
+  });
+}
+
+export async function deletePitch(organizationId: string, pitchId: string) {
+  const existing = await prisma.pitch.findFirst({ where: { id: pitchId, organizationId }, select: { id: true } });
+  if (!existing) return null;
+  return prisma.pitch.delete({ where: { id: existing.id } });
 }
 
 export async function listStandings(organizationId: string, competitionId?: string) {

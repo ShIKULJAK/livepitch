@@ -29,6 +29,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       scheduledAt: match.scheduledAt,
       status: match.status,
       venue: match.venue?.name ?? "TBD",
+      venueLabel: match.venueLabel ?? null,
+      pitchName: match.pitchName ?? null,
       venueId: match.venueId,
       regularTimeMinutes: match.regularTimeMinutes,
       createdById: match.createdById,

@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CompetitionStatus, CompetitionType, SportType } from "@prisma/client";
@@ -13,12 +13,13 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useCreateCompetition, useTeams } from "@/hooks/use-competitions";
+import { useCreateCompetition, useTeams, useVenues } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { createCompetitionSchema } from "@/lib/validation/competition";
 import { useI18n } from "@/lib/i18n";
 import { canManageTournaments } from "@/lib/permissions";
 import { SPORT_OPTIONS } from "@/lib/constants/sports";
+import { GENERATION_LABELS } from "@/lib/constants/generation-presets";
 
 const steps = ["createCompetition.step.basic", "createCompetition.step.format", "createCompetition.step.details", "createCompetition.step.review"];
 
@@ -43,6 +44,9 @@ const defaults: CompetitionFormValues = {
   teamSize: 11,
   substitutions: 5,
   matchDurationMinutes: 90,
+  stadiumName: "Stadion",
+  pitchNames: ["Teren 1"],
+  scheduleDays: [{ dayLabel: "Dan 1", generationLabel: `Generacija ${new Date().getFullYear() - 8}`, startTime: "09:00", endTime: "19:00" }],
   seasonLabel: `${new Date().getFullYear()}/${new Date().getFullYear() + 1}`,
   participantTeamIds: [],
   format: "Knockout + Group Stage",
@@ -55,6 +59,74 @@ function toIsoDate(value?: string) {
   return value ? new Date(`${value}T00:00:00.000Z`).toISOString() : undefined;
 }
 
+type StadiumBlock = { stadiumName: string; pitchNames: string[] };
+const STADIUM_PITCH_SEPARATOR = " - ";
+
+function parsePitchEntry(rawPitch: string, fallbackStadium: string) {
+  const value = rawPitch.trim();
+  if (!value) return null;
+
+  const segments = value.split(STADIUM_PITCH_SEPARATOR).map((segment) => segment.trim()).filter(Boolean);
+  if (segments.length >= 2) {
+    const last = segments[segments.length - 1];
+    const secondLast = segments[segments.length - 2];
+    if (/^teren\b/i.test(last)) {
+      return { stadiumName: secondLast, pitchName: last };
+    }
+  }
+
+  return { stadiumName: fallbackStadium, pitchName: value };
+}
+
+function normalizePitchNameForStorage(rawPitch: string, fallbackPitchName: string) {
+  const value = rawPitch.trim();
+  if (!value) return fallbackPitchName;
+  const segments = value.split(STADIUM_PITCH_SEPARATOR).map((segment) => segment.trim()).filter(Boolean);
+  if (segments.length >= 2) {
+    const last = segments[segments.length - 1];
+    if (/^teren\b/i.test(last)) return last;
+  }
+  return value;
+}
+
+function decodeStadiumBlocks(stadiumName?: string, pitchNames?: string[]): StadiumBlock[] {
+  const blocksMap = new Map<string, string[]>();
+  const fallbackStadium = stadiumName || "Stadion 1";
+  const rawPitches = pitchNames?.length ? pitchNames : ["Teren 1"];
+
+  for (const rawPitch of rawPitches) {
+    const parsed = parsePitchEntry(rawPitch, fallbackStadium);
+    if (!parsed) continue;
+    if (!blocksMap.has(parsed.stadiumName)) blocksMap.set(parsed.stadiumName, []);
+    blocksMap.get(parsed.stadiumName)!.push(parsed.pitchName);
+  }
+
+  if (!blocksMap.size) return [{ stadiumName: fallbackStadium, pitchNames: ["Teren 1"] }];
+  return Array.from(blocksMap.entries()).map(([name, pitches]) => ({
+    stadiumName: name,
+    pitchNames: Array.from(new Set(pitches.filter((pitch) => pitch.trim().length > 0))),
+  }));
+}
+
+function encodeStadiumBlocks(blocks: StadiumBlock[]) {
+  const normalizedBlocks = blocks
+    .map((block, blockIndex) => ({
+      stadiumName: block.stadiumName || `Stadion ${blockIndex + 1}`,
+      pitchNames: block.pitchNames.map((pitch, pitchIndex) => normalizePitchNameForStorage(pitch, `Teren ${pitchIndex + 1}`)),
+    }))
+    .filter((block) => block.pitchNames.length > 0);
+
+  const fallback = normalizedBlocks[0]?.stadiumName ?? "Stadion 1";
+  const flattenedPitches = normalizedBlocks.flatMap((block) =>
+    block.pitchNames.map((pitch) => `${block.stadiumName}${STADIUM_PITCH_SEPARATOR}${pitch}`)
+  );
+
+  return {
+    stadiumName: fallback,
+    pitchNames: flattenedPitches.length ? flattenedPitches : [`${fallback}${STADIUM_PITCH_SEPARATOR}Teren 1`],
+  };
+}
+
 export default function CreateTournamentPage() {
   const { t } = useI18n();
   const router = useRouter();
@@ -63,6 +135,9 @@ export default function CreateTournamentPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const createCompetition = useCreateCompetition();
   const teamsQuery = useTeams();
+  const venuesQuery = useVenues();
+  const generationOptions = GENERATION_LABELS;
+  const [stadiumBlocks, setStadiumBlocks] = useState<StadiumBlock[]>(() => decodeStadiumBlocks(defaults.stadiumName, defaults.pitchNames));
 
   const form = useForm<CompetitionFormValues>({
     resolver: zodResolver(createCompetitionSchema.extend({
@@ -84,7 +159,28 @@ export default function CreateTournamentPage() {
   const watchedSport = useWatch({ control: form.control, name: "sport" });
   const watchedSeasonLabel = useWatch({ control: form.control, name: "seasonLabel" });
   const participantTeamIds = useWatch({ control: form.control, name: "participantTeamIds" }) ?? [];
+  const pitchNames = useWatch({ control: form.control, name: "pitchNames" }) ?? ["Teren 1"];
+  const scheduleDays =
+    useWatch({ control: form.control, name: "scheduleDays" }) ??
+    [{ dayLabel: "Dan 1", generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }];
   const [teamSearch, setTeamSearch] = useState("");
+  const pitchOptions = useMemo(
+    () =>
+      (venuesQuery.data ?? []).flatMap((venue) =>
+        venue.pitches.map((pitch) => ({
+          id: pitch.id,
+          generationLabel: pitch.generationLabel,
+          label: `${venue.name} - ${pitch.name} (${pitch.fieldLengthMeters}x${pitch.fieldWidthMeters} m, ${pitch.playerFormat})`,
+        }))
+      ),
+    [venuesQuery.data]
+  );
+
+  useEffect(() => {
+    const encoded = encodeStadiumBlocks(stadiumBlocks);
+    form.setValue("stadiumName", encoded.stadiumName, { shouldDirty: true, shouldValidate: true });
+    form.setValue("pitchNames", encoded.pitchNames, { shouldDirty: true, shouldValidate: true });
+  }, [form, stadiumBlocks]);
 
   const availableTeams = (teamsQuery.data ?? []).filter(
     (team) => team.sport === watchedSport && team.name.toLowerCase().includes(teamSearch.toLowerCase())
@@ -100,6 +196,9 @@ export default function CreateTournamentPage() {
     ["Format", watchedFormat || "TBD"],
     ["Match Duration", `${form.getValues("matchDurationMinutes")} min`],
     ["Participants", participantTeamIds.length ? `${participantTeamIds.length} selected` : "None"],
+    ["Stadium", form.getValues("stadiumName") || "N/A"],
+    ["Pitches", pitchNames.join(", ")],
+                    ["Schedule Days", scheduleDays.map((d) => `${d.dayLabel} · ${d.generationLabel} · ${d.startTime}-${d.endTime}`).join(" | ")],
   ];
 
   function toggleParticipant(teamId: string) {
@@ -229,6 +328,198 @@ export default function CreateTournamentPage() {
               <FormField label="End Date" tooltip="Competition expected end date.">
                 <Input type="date" {...form.register("endDateInput")} />
               </FormField>
+              <div className="space-y-2">
+                <FormField
+                  label="Stadioni i tereni"
+                  tooltip="Dodaj jedan ili više stadiona i njihove terene."
+                  required
+                  error={form.formState.errors.pitchNames?.message as string | undefined}
+                >
+                  <div className="space-y-2">
+                    {stadiumBlocks.map((stadium, stadiumIndex) => (
+                      <div key={`stadium-${stadiumIndex}`} className="space-y-2 rounded-lg border p-2" style={{ borderColor: "var(--border)" }}>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            placeholder={`Stadion ${stadiumIndex + 1}`}
+                            value={stadium.stadiumName}
+                            onChange={(event) => {
+                              const next = [...stadiumBlocks];
+                              next[stadiumIndex] = { ...next[stadiumIndex], stadiumName: event.currentTarget.value };
+                              setStadiumBlocks(next);
+                            }}
+                          />
+                          {stadiumBlocks.length > 1 ? (
+                            <Button
+                              type="button"
+                              onClick={() => {
+                                const next = stadiumBlocks.filter((_, index) => index !== stadiumIndex);
+                                setStadiumBlocks(next.length ? next : [{ stadiumName: "Stadion 1", pitchNames: ["Teren 1"] }]);
+                              }}
+                            >
+                              -
+                            </Button>
+                          ) : null}
+                        </div>
+                        {stadium.pitchNames.map((pitch, pitchIndex) => (
+                          <div key={`stadium-${stadiumIndex}-pitch-${pitchIndex}`} className="flex items-center gap-2 pl-2">
+                            <Input
+                              placeholder={`Teren ${pitchIndex + 1}`}
+                              value={pitch}
+                              onChange={(event) => {
+                                const next = [...stadiumBlocks];
+                                const nextPitches = [...next[stadiumIndex].pitchNames];
+                                nextPitches[pitchIndex] = event.currentTarget.value;
+                                next[stadiumIndex] = { ...next[stadiumIndex], pitchNames: nextPitches };
+                                setStadiumBlocks(next);
+                              }}
+                            />
+                            {stadium.pitchNames.length > 1 ? (
+                              <Button
+                                type="button"
+                                onClick={() => {
+                                  const next = [...stadiumBlocks];
+                                  const nextPitches = next[stadiumIndex].pitchNames.filter((_, index) => index !== pitchIndex);
+                                  next[stadiumIndex] = { ...next[stadiumIndex], pitchNames: nextPitches.length ? nextPitches : ["Teren 1"] };
+                                  setStadiumBlocks(next);
+                                }}
+                              >
+                                -
+                              </Button>
+                            ) : null}
+                          </div>
+                        ))}
+                        <Button
+                          type="button"
+                          onClick={() => {
+                            const next = [...stadiumBlocks];
+                            next[stadiumIndex] = {
+                              ...next[stadiumIndex],
+                              pitchNames: [...next[stadiumIndex].pitchNames, `Teren ${next[stadiumIndex].pitchNames.length + 1}`],
+                            };
+                            setStadiumBlocks(next);
+                          }}
+                        >
+                          Dodaj teren
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      type="button"
+                      onClick={() => setStadiumBlocks((current) => [...current, { stadiumName: `Stadion ${current.length + 1}`, pitchNames: ["Teren 1"] }])}
+                    >
+                      Dodaj stadion
+                    </Button>
+                  </div>
+                </FormField>
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <FormField
+                  label="Dani i satnica"
+                  tooltip="Dodaj dane turnira i vremenski opseg (od-do) za planiranje utakmica."
+                  required
+                  error={form.formState.errors.scheduleDays?.message as string | undefined}
+                >
+                  <div className="space-y-2">
+                    {scheduleDays.map((day, index) => (
+                      <div key={`${index}-${day.dayLabel}`} className="grid gap-2 md:grid-cols-[1fr_220px_1fr_130px_130px_auto]">
+                        <Input
+                          placeholder={`Dan ${index + 1}`}
+                          value={day.dayLabel}
+                          onChange={(event) => {
+                            const next = [...scheduleDays];
+                            next[index] = { ...next[index], dayLabel: event.currentTarget.value };
+                            form.setValue("scheduleDays", next, { shouldDirty: true, shouldValidate: true });
+                          }}
+                        />
+                        <Select
+                          value={day.generationLabel}
+                          onChange={(event) => {
+                            const next = [...scheduleDays];
+                            const generationLabel = event.currentTarget.value;
+                            const compatiblePitch = pitchOptions.find((pitch) => pitch.generationLabel === generationLabel);
+                            next[index] = { ...next[index], generationLabel, pitchId: compatiblePitch?.id ?? next[index].pitchId ?? null };
+                            form.setValue("scheduleDays", next, { shouldDirty: true, shouldValidate: true });
+                          }}
+                        >
+                          {generationOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </Select>
+                        <Select
+                          value={day.pitchId ?? ""}
+                          onChange={(event) => {
+                            const next = [...scheduleDays];
+                            next[index] = { ...next[index], pitchId: event.currentTarget.value || null };
+                            form.setValue("scheduleDays", next, { shouldDirty: true, shouldValidate: true });
+                          }}
+                        >
+                          <option value="">Izaberi teren</option>
+                          {pitchOptions
+                            .slice()
+                            .sort((a, b) => {
+                              const aMatch = a.generationLabel === day.generationLabel ? 0 : 1;
+                              const bMatch = b.generationLabel === day.generationLabel ? 0 : 1;
+                              if (aMatch !== bMatch) return aMatch - bMatch;
+                              return a.label.localeCompare(b.label);
+                            })
+                            .map((pitch) => (
+                              <option key={pitch.id} value={pitch.id}>
+                                {pitch.label}
+                              </option>
+                            ))}
+                        </Select>
+                        <Input
+                          type="time"
+                          value={day.startTime}
+                          onChange={(event) => {
+                            const next = [...scheduleDays];
+                            next[index] = { ...next[index], startTime: event.currentTarget.value };
+                            form.setValue("scheduleDays", next, { shouldDirty: true, shouldValidate: true });
+                          }}
+                        />
+                        <Input
+                          type="time"
+                          value={day.endTime}
+                          onChange={(event) => {
+                            const next = [...scheduleDays];
+                            next[index] = { ...next[index], endTime: event.currentTarget.value };
+                            form.setValue("scheduleDays", next, { shouldDirty: true, shouldValidate: true });
+                          }}
+                        />
+                        {scheduleDays.length > 1 ? (
+                          <Button
+                            type="button"
+                            onClick={() => {
+                            const next = scheduleDays.filter((_, itemIndex) => itemIndex !== index);
+                              form.setValue(
+                                "scheduleDays",
+                                next.length ? next : [{ dayLabel: "Dan 1", generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }],
+                                { shouldDirty: true, shouldValidate: true }
+                              );
+                            }}
+                          >
+                            -
+                          </Button>
+                        ) : null}
+                      </div>
+                    ))}
+                    <Button
+                      type="button"
+                      onClick={() =>
+                        form.setValue(
+                          "scheduleDays",
+                          [...scheduleDays, { dayLabel: `Dan ${scheduleDays.length + 1}`, generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }],
+                          { shouldDirty: true, shouldValidate: true }
+                        )
+                      }
+                    >
+                      Dodaj dan
+                    </Button>
+                  </div>
+                </FormField>
+              </div>
               <div className="space-y-2 md:col-span-2">
                 <FormField label="Participants" tooltip="Select existing teams for the chosen sport. These teams become official competition participants.">
                   <Input placeholder="Search teams..." value={teamSearch} onChange={(event) => setTeamSearch(event.currentTarget.value)} />

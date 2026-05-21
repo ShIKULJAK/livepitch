@@ -6,6 +6,8 @@ export const matchInputSchema = z.object({
   homeTeamId: z.string().min(1),
   awayTeamId: z.string().min(1),
   venueId: z.string().optional().nullable(),
+  venueLabel: z.string().max(180).optional().nullable(),
+  pitchName: z.string().max(80).optional().nullable(),
   round: z.string().max(80).optional().nullable(),
   scheduledAt: z.string().datetime(),
   status: z.nativeEnum(MatchStatus).optional(),

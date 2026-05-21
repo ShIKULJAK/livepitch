@@ -35,6 +35,8 @@ export default function CreateMatchPage() {
   const [round, setRound] = useState("");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("18:00");
+  const [stadiumName, setStadiumName] = useState("");
+  const [pitchName, setPitchName] = useState("Teren 1");
   const [status, setStatus] = useState<MatchStatus>(MatchStatus.SCHEDULED);
 
   const teams = useMemo(() => {
@@ -43,14 +45,22 @@ export default function CreateMatchPage() {
     if (!competition) return teamsQuery.data ?? [];
     return (teamsQuery.data ?? []).filter((team) => team.sport === competition.sport);
   }, [competitionId, competitionsQuery.data, teamsQuery.data]);
+  const selectedCompetition = useMemo(
+    () => (competitionsQuery.data ?? []).find((item) => item.id === competitionId),
+    [competitionId, competitionsQuery.data]
+  );
+  const availablePitches = selectedCompetition?.pitchNames?.length ? selectedCompetition.pitchNames : ["Teren 1"];
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const effectiveStadiumName = stadiumName || selectedCompetition?.stadiumName || "";
     await createMatch.mutateAsync({
       competitionId,
       homeTeamId,
       awayTeamId,
       venueId: venueId || null,
+      venueLabel: effectiveStadiumName ? `${effectiveStadiumName} - ${pitchName}` : null,
+      pitchName: pitchName || null,
       round: round || null,
       scheduledAt: toIsoDate(date, time),
       status,
@@ -115,6 +125,22 @@ export default function CreateMatchPage() {
           </FormField>
           <FormField label="Kickoff Time" tooltip="Local kickoff time." required>
             <Input type="time" value={time} onChange={(event) => setTime(event.currentTarget.value)} required />
+          </FormField>
+          <FormField label="Stadium" tooltip="Main stadium for this match venue label.">
+            <Input
+              value={stadiumName || selectedCompetition?.stadiumName || ""}
+              onChange={(event) => setStadiumName(event.currentTarget.value)}
+              placeholder="Stadium name"
+            />
+          </FormField>
+          <FormField label="Pitch" tooltip="Pitch inside selected stadium.">
+            <Select value={pitchName} onChange={(event) => setPitchName(event.currentTarget.value)}>
+              {availablePitches.map((pitch) => (
+                <option key={pitch} value={pitch}>
+                  {pitch}
+                </option>
+              ))}
+            </Select>
           </FormField>
           <FormField label="Venue" tooltip="Venue where match is played.">
             <Select value={venueId} onChange={(event) => setVenueId(event.currentTarget.value)}>

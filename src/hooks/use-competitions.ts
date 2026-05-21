@@ -33,6 +33,20 @@ const competitionListResponse = z.object({
       matchesCount: z.number(),
       liveMatches: z.number(),
       matchDurationMinutes: z.number(),
+      stadiumName: z.string().nullable().optional(),
+      pitchNames: z.array(z.string()).optional(),
+      scheduleDays: z
+        .array(
+          z.object({
+            dayLabel: z.string(),
+            generationLabel: z.string().optional(),
+            pitchId: z.string().nullable().optional(),
+            startTime: z.string(),
+            endTime: z.string(),
+          })
+        )
+        .nullable()
+        .optional(),
       seasonId: z.string().nullable().optional(),
       seasonLabel: z.string().nullable().optional(),
       startDate: z.string().datetime().nullable().optional(),
@@ -60,6 +74,20 @@ const competitionDetailsResponse = z.object({
     teamSize: z.number().nullable(),
     substitutions: z.number().nullable(),
     matchDurationMinutes: z.number(),
+    stadiumName: z.string().nullable().optional(),
+    pitchNames: z.array(z.string()).optional(),
+    scheduleDays: z
+      .array(
+        z.object({
+          dayLabel: z.string(),
+          generationLabel: z.string().optional(),
+          pitchId: z.string().nullable().optional(),
+          startTime: z.string(),
+          endTime: z.string(),
+        })
+      )
+      .nullable()
+      .optional(),
     seasonId: z.string().nullable(),
     season: z.object({ id: z.string(), name: z.string() }).nullable().optional(),
     seasonOptions: z
@@ -106,6 +134,7 @@ const teamsResponse = z.object({
       sport: z.nativeEnum(SportType),
       name: z.string(),
       shortName: z.string().nullable(),
+      place: z.string().nullable(),
       city: z.string().nullable(),
       country: z.string().nullable(),
       coach: z.string().nullable(),
@@ -172,6 +201,8 @@ const matchesResponse = z.object({
       liveMinute: z.number().nullable(),
       regularTimeMinutes: z.number(),
       venue: z.string(),
+      venueLabel: z.string().nullable().optional(),
+      pitchName: z.string().nullable().optional(),
     })
   ),
 });
@@ -186,6 +217,8 @@ const matchDetailsResponse = z.object({
     scheduledAt: z.string().datetime(),
     status: z.nativeEnum(MatchStatus),
     venue: z.string(),
+    venueLabel: z.string().nullable().optional(),
+    pitchName: z.string().nullable().optional(),
     venueId: z.string().nullable(),
     regularTimeMinutes: z.number(),
     createdById: z.string().nullable().optional(),
@@ -250,6 +283,21 @@ const venuesResponse = z.object({
       dimensions: z.string().nullable(),
       lighting: z.boolean(),
       accessibility: z.string().nullable(),
+      pitches: z.array(
+        z.object({
+          id: z.string(),
+          venueId: z.string().nullable(),
+          name: z.string(),
+          generationLabel: z.string().nullable(),
+          ageGroupCode: z.string().nullable(),
+          playerFormat: z.string(),
+          fieldLengthMeters: z.number(),
+          fieldWidthMeters: z.number(),
+          goalWidthMeters: z.number().nullable(),
+          goalHeightMeters: z.number().nullable(),
+          isActive: z.boolean(),
+        })
+      ),
     })
   ),
 });
@@ -301,6 +349,7 @@ const drawCompetitionsResponse = z.object({
       status: z.nativeEnum(CompetitionStatus),
       participantsCount: z.number(),
       participants: z.array(z.object({ id: z.string(), name: z.string() })),
+      generationYears: z.array(z.number()).optional(),
       hasDraw: z.boolean(),
       drawUpdatedAt: z.string().datetime().nullable(),
     })
@@ -318,7 +367,9 @@ const competitionDrawResponse = z.object({
       seasonId: z.string().nullable().optional(),
       seasonLabel: z.string().nullable().optional(),
       matchDurationMinutes: z.number(),
-      participants: z.array(z.object({ id: z.string(), name: z.string() })),
+      availableGenerationYears: z.array(z.number()).optional(),
+      selectedGenerationYear: z.number().nullable().optional(),
+      participants: z.array(z.object({ id: z.string(), name: z.string(), profileImageUrl: z.string().nullable().optional() })),
     }),
     draw: z
       .object({
@@ -338,7 +389,7 @@ const competitionDrawResponse = z.object({
               z.object({
                 id: z.string(),
                 position: z.number().nullable(),
-                team: z.object({ id: z.string(), name: z.string() }),
+                team: z.object({ id: z.string(), name: z.string(), profileImageUrl: z.string().nullable().optional() }),
               })
             ),
           })
@@ -356,11 +407,23 @@ const competitionDrawResponse = z.object({
                 homeSourceValue: z.string(),
                 awaySourceType: z.nativeEnum(DrawSourceType),
                 awaySourceValue: z.string(),
-                homeTeam: z.object({ id: z.string(), name: z.string() }).nullable(),
-                awayTeam: z.object({ id: z.string(), name: z.string() }).nullable(),
-                winnerTeam: z.object({ id: z.string(), name: z.string() }).nullable(),
+                homeTeam: z.object({ id: z.string(), name: z.string(), profileImageUrl: z.string().nullable().optional() }).nullable(),
+                awayTeam: z.object({ id: z.string(), name: z.string(), profileImageUrl: z.string().nullable().optional() }).nullable(),
+                winnerTeam: z.object({ id: z.string(), name: z.string(), profileImageUrl: z.string().nullable().optional() }).nullable(),
               })
             ),
+          })
+        ),
+        groupMatches: z.array(
+          z.object({
+            id: z.string(),
+            round: z.string().nullable(),
+            scheduledAt: z.string().datetime(),
+            venueLabel: z.string().nullable(),
+            pitchName: z.string().nullable(),
+            generationYear: z.number().nullable().optional(),
+            homeTeam: z.object({ id: z.string(), name: z.string(), profileImageUrl: z.string().nullable().optional() }),
+            awayTeam: z.object({ id: z.string(), name: z.string(), profileImageUrl: z.string().nullable().optional() }),
           })
         ),
       })
@@ -440,6 +503,68 @@ const notificationsResponse = z.object({
         link: z.string(),
         isRead: z.boolean(),
         createdAt: z.string().datetime(),
+      })
+    ),
+  }),
+});
+
+const teamApplicationCompetitionListResponse = z.object({
+  data: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      type: z.nativeEnum(CompetitionType),
+      status: z.nativeEnum(CompetitionStatus),
+      seasonLabel: z.string().nullable(),
+      sport: z.nativeEnum(SportType),
+      startDate: z.string().datetime().nullable(),
+      endDate: z.string().datetime().nullable(),
+    })
+  ),
+});
+
+const teamApplicationsResponse = z.object({
+  data: z.object({
+    competitionId: z.string(),
+    seasonOptions: z.array(
+      z.object({
+        competitionId: z.string(),
+        seasonId: z.string().nullable(),
+        seasonLabel: z.string().nullable(),
+      })
+    ),
+    defaultSeasonCompetitionId: z.string(),
+    applications: z.array(
+      z.object({
+        id: z.string(),
+        competitionId: z.string(),
+        competitionName: z.string(),
+        seasonLabel: z.string().nullable(),
+        teamName: z.string(),
+        place: z.string(),
+        submittedAt: z.string().datetime(),
+        submittedDate: z.string().datetime(),
+        status: z.enum(["PENDING", "APPROVED", "REJECTED", "CANCELLED"]),
+        generations: z.array(
+          z.object({
+            generationYear: z.number(),
+            isRequested: z.boolean(),
+            isApproved: z.boolean().nullable(),
+          })
+        ),
+      })
+    ),
+  }),
+});
+
+const competitionGenerationParticipantsResponse = z.object({
+  data: z.object({
+    competitionId: z.string(),
+    participants: z.array(
+      z.object({
+        teamId: z.string(),
+        teamName: z.string(),
+        generationYears: z.array(z.number()),
       })
     ),
   }),
@@ -925,12 +1050,13 @@ export function useDrawCompetitions() {
   });
 }
 
-export function useCompetitionDraw(competitionId?: string) {
+export function useCompetitionDraw(competitionId?: string, generationYear?: number | null) {
   return useQuery({
-    queryKey: ["competition-draw", competitionId],
+    queryKey: ["competition-draw", competitionId, generationYear ?? "auto"],
     enabled: Boolean(competitionId),
     queryFn: async () => {
-      const response = await fetch(`/api/draws/${competitionId}`);
+      const suffix = generationYear ? `?generationYear=${generationYear}` : "";
+      const response = await fetch(`/api/draws/${competitionId}${suffix}`);
       if (!response.ok) throw new Error("Failed to load draw");
       return competitionDrawResponse.parse(await response.json()).data;
     },
@@ -938,6 +1064,7 @@ export function useCompetitionDraw(competitionId?: string) {
 }
 
 type DrawConfigPayload = {
+  generationYear?: number;
   groupStageEnabled: boolean;
   groupsCount: number;
   roundOf16Enabled: boolean;
@@ -991,6 +1118,142 @@ export function useVenues() {
       if (!response.ok) throw new Error("Failed to load venues");
       return venuesResponse.parse(await response.json()).data;
     },
+  });
+}
+
+export function useCreatePitch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: {
+      venueId?: string | null;
+      name: string;
+      generationLabel?: string | null;
+      ageGroupCode?: string | null;
+      playerFormat: string;
+      fieldLengthMeters: number;
+      fieldWidthMeters: number;
+      goalWidthMeters?: number | null;
+      goalHeightMeters?: number | null;
+      isActive?: boolean;
+    }) => {
+      const response = await fetch("/api/venues", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await safeReadJson(response);
+      if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to create pitch");
+      return (json as { data: unknown }).data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["venues"] }),
+  });
+}
+
+export function useCreateVenue() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: {
+      name: string;
+      city?: string | null;
+      country?: string | null;
+      capacity?: number | null;
+      surface?: string | null;
+      dimensions?: string | null;
+      lighting?: boolean;
+      accessibility?: string | null;
+    }) => {
+      const response = await fetch("/api/venues", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "venue", ...payload }),
+      });
+      const json = await safeReadJson(response);
+      if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to create venue");
+      return (json as { data: unknown }).data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["venues"] }),
+  });
+}
+
+export function useUpdateVenue() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: {
+      id: string;
+      name?: string;
+      city?: string | null;
+      country?: string | null;
+      capacity?: number | null;
+      surface?: string | null;
+      dimensions?: string | null;
+      lighting?: boolean;
+      accessibility?: string | null;
+    }) => {
+      const response = await fetch("/api/venues", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "venue", ...payload }),
+      });
+      const json = await safeReadJson(response);
+      if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to update venue");
+      return (json as { data: unknown }).data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["venues"] }),
+  });
+}
+
+export function useDeleteVenue() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (venueId: string) => {
+      const response = await fetch(`/api/venues?kind=venue&id=${venueId}`, { method: "DELETE" });
+      const json = await safeReadJson(response);
+      if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to delete venue");
+      return json;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["venues"] }),
+  });
+}
+
+export function useUpdatePitch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: {
+      id: string;
+      venueId?: string | null;
+      name?: string;
+      generationLabel?: string | null;
+      ageGroupCode?: string | null;
+      playerFormat?: string;
+      fieldLengthMeters?: number;
+      fieldWidthMeters?: number;
+      goalWidthMeters?: number | null;
+      goalHeightMeters?: number | null;
+      isActive?: boolean;
+    }) => {
+      const response = await fetch("/api/venues", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await safeReadJson(response);
+      if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to update pitch");
+      return (json as { data: unknown }).data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["venues"] }),
+  });
+}
+
+export function useDeletePitch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (pitchId: string) => {
+      const response = await fetch(`/api/venues?id=${pitchId}`, { method: "DELETE" });
+      const json = await safeReadJson(response);
+      if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to delete pitch");
+      return json;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["venues"] }),
   });
 }
 
@@ -1131,6 +1394,95 @@ export function useNotifications() {
       return notificationsResponse.parse(await response.json()).data;
     },
     refetchInterval: 15000,
+  });
+}
+
+export function useApplicableCompetitions(filters?: { q?: string; type?: CompetitionType | "ALL" }) {
+  return useQuery({
+    queryKey: ["applicable-competitions", filters],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (filters?.q) params.set("q", filters.q);
+      if (filters?.type && filters.type !== "ALL") params.set("type", filters.type);
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      const response = await fetch(`/api/team-applications${suffix}`);
+      if (!response.ok) throw new Error("Failed to load applicable competitions");
+      return teamApplicationCompetitionListResponse.parse(await response.json()).data;
+    },
+  });
+}
+
+export function useSubmitTeamApplication() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: {
+      competitionId: string;
+      teamId?: string | null;
+      teamName: string;
+      generationYears: number[];
+      players: Array<{ generationYear: number; birthYear: number; jerseyNumber: number; fullName: string }>;
+      coaches: Array<{ fullName: string; phone: string; email?: string }>;
+      place: string;
+      submittedDate: string;
+    }) => {
+      const response = await fetch("/api/team-applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await safeReadJson(response);
+      if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to submit team application");
+      return (json as { data: unknown }).data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["team-applications"] });
+    },
+  });
+}
+
+export function useTeamApplications(competitionId?: string) {
+  return useQuery({
+    queryKey: ["team-applications", competitionId],
+    enabled: Boolean(competitionId),
+    queryFn: async () => {
+      const response = await fetch(`/api/team-applications?competitionId=${competitionId}`);
+      if (!response.ok) throw new Error("Failed to load team applications");
+      return teamApplicationsResponse.parse(await response.json()).data;
+    },
+  });
+}
+
+export function useApproveTeamApplication(competitionId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { applicationId: string; approvedGenerationYears: number[] }) => {
+      const response = await fetch(`/api/team-applications/approve?competitionId=${competitionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await safeReadJson(response);
+      if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to approve application");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["team-applications", competitionId] });
+      queryClient.invalidateQueries({ queryKey: ["competition-generation-participants", competitionId] });
+      queryClient.invalidateQueries({ queryKey: ["competitions"] });
+      queryClient.invalidateQueries({ queryKey: ["competition-draw", competitionId] });
+    },
+  });
+}
+
+export function useCompetitionGenerationParticipants(competitionId?: string) {
+  return useQuery({
+    queryKey: ["competition-generation-participants", competitionId],
+    enabled: Boolean(competitionId),
+    queryFn: async () => {
+      const response = await fetch(`/api/team-applications?mode=participants&competitionId=${competitionId}`);
+      if (!response.ok) throw new Error("Failed to load generation participants");
+      return competitionGenerationParticipantsResponse.parse(await response.json()).data;
+    },
   });
 }
 

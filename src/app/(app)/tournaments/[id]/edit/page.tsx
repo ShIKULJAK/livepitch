@@ -3,9 +3,20 @@
 import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { CompetitionStatus, CompetitionType, SportType } from "@prisma/client";
-import { useCompetition, useSeasonSquads, useTeams, useUpdateCompetition, useUpdateSeasonSquad } from "@/hooks/use-competitions";
+import {
+  useApproveTeamApplication,
+  useCompetition,
+  useCompetitionGenerationParticipants,
+  useSeasonSquads,
+  useTeamApplications,
+  useTeams,
+  useUpdateCompetition,
+  useUpdateSeasonSquad,
+  useVenues,
+} from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { SPORT_OPTIONS } from "@/lib/constants/sports";
+import { GENERATION_LABELS } from "@/lib/constants/generation-presets";
 import { canCreateCompetitions } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -24,16 +35,90 @@ function toIsoDate(value?: string) {
   return value ? new Date(`${value}T00:00:00.000Z`).toISOString() : null;
 }
 
+type StadiumBlock = { stadiumName: string; pitchNames: string[] };
+const STADIUM_PITCH_SEPARATOR = " - ";
+
+function parsePitchEntry(rawPitch: string, fallbackStadium: string) {
+  const value = rawPitch.trim();
+  if (!value) return null;
+
+  const segments = value.split(STADIUM_PITCH_SEPARATOR).map((segment) => segment.trim()).filter(Boolean);
+  if (segments.length >= 2) {
+    const last = segments[segments.length - 1];
+    const secondLast = segments[segments.length - 2];
+    if (/^teren\b/i.test(last)) {
+      return { stadiumName: secondLast, pitchName: last };
+    }
+  }
+
+  return { stadiumName: fallbackStadium, pitchName: value };
+}
+
+function normalizePitchNameForStorage(rawPitch: string, fallbackPitchName: string) {
+  const value = rawPitch.trim();
+  if (!value) return fallbackPitchName;
+  const segments = value.split(STADIUM_PITCH_SEPARATOR).map((segment) => segment.trim()).filter(Boolean);
+  if (segments.length >= 2) {
+    const last = segments[segments.length - 1];
+    if (/^teren\b/i.test(last)) return last;
+  }
+  return value;
+}
+
+function decodeStadiumBlocks(stadiumName?: string | null, pitchNames?: string[] | null): StadiumBlock[] {
+  const blocksMap = new Map<string, string[]>();
+  const fallbackStadium = stadiumName || "Stadion 1";
+  const rawPitches = pitchNames?.length ? pitchNames : ["Teren 1"];
+
+  for (const rawPitch of rawPitches) {
+    const parsed = parsePitchEntry(rawPitch, fallbackStadium);
+    if (!parsed) continue;
+    if (!blocksMap.has(parsed.stadiumName)) blocksMap.set(parsed.stadiumName, []);
+    blocksMap.get(parsed.stadiumName)!.push(parsed.pitchName);
+  }
+
+  if (!blocksMap.size) return [{ stadiumName: fallbackStadium, pitchNames: ["Teren 1"] }];
+  return Array.from(blocksMap.entries()).map(([name, pitches]) => ({
+    stadiumName: name,
+    pitchNames: Array.from(new Set(pitches.filter((pitch) => pitch.trim().length > 0))),
+  }));
+}
+
+function encodeStadiumBlocks(blocks: StadiumBlock[]) {
+  const normalizedBlocks = blocks
+    .map((block, blockIndex) => ({
+      stadiumName: block.stadiumName || `Stadion ${blockIndex + 1}`,
+      pitchNames: block.pitchNames.map((pitch, pitchIndex) => normalizePitchNameForStorage(pitch, `Teren ${pitchIndex + 1}`)),
+    }))
+    .filter((block) => block.pitchNames.length > 0);
+
+  const fallback = normalizedBlocks[0]?.stadiumName ?? "Stadion 1";
+  const flattenedPitches = normalizedBlocks.flatMap((block) =>
+    block.pitchNames.map((pitch) => `${block.stadiumName}${STADIUM_PITCH_SEPARATOR}${pitch}`)
+  );
+
+  return {
+    stadiumName: fallback,
+    pitchNames: flattenedPitches.length ? flattenedPitches : [`${fallback}${STADIUM_PITCH_SEPARATOR}Teren 1`],
+  };
+}
+
 export default function EditCompetitionPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { user } = useCurrentUser();
   const competitionQuery = useCompetition(params.id);
   const teamsQuery = useTeams();
+  const venuesQuery = useVenues();
   const seasonSquadsQuery = useSeasonSquads(params.id);
   const updateSeasonSquad = useUpdateSeasonSquad(params.id);
   const updateCompetition = useUpdateCompetition(params.id);
+  const applicationsQuery = useTeamApplications(params.id);
+  const approveApplication = useApproveTeamApplication(params.id);
+  const generationParticipantsQuery = useCompetitionGenerationParticipants(params.id);
   const [teamSearch, setTeamSearch] = useState("");
+  const [applicationsSeasonCompetitionId, setApplicationsSeasonCompetitionId] = useState<string>(params.id);
+  const [approvalDraft, setApprovalDraft] = useState<Record<string, number[]>>({});
   const [selectedSeasonTeamId, setSelectedSeasonTeamId] = useState<string | null>(null);
   const [squadDraft, setSquadDraft] = useState<Record<string, string[]>>({});
   const [draft, setDraft] = useState<{
@@ -57,13 +142,34 @@ export default function EditCompetitionPage() {
     description?: string;
     notes?: string;
     participantTeamIds?: string[];
+    stadiumName?: string;
+    pitchNames?: string[];
+    scheduleDays?: Array<{ dayLabel: string; generationLabel: string; pitchId?: string | null; startTime: string; endTime: string }>;
   }>({});
+  const generationOptions = GENERATION_LABELS;
 
   const canEditByRole = canCreateCompetitions(user?.role);
   const competition = competitionQuery.data;
   const canEdit = canEditByRole && Boolean(competition?.canEdit);
   const participantTeamIds = draft.participantTeamIds ?? competition?.teams.map((entry) => entry.teamId) ?? [];
   const selectedSport = draft.sport ?? competition?.sport ?? SportType.FOOTBALL;
+  const pitchNames = draft.pitchNames ?? competition?.pitchNames ?? ["Teren 1"];
+  const stadiumBlocks = decodeStadiumBlocks(draft.stadiumName ?? competition?.stadiumName, pitchNames);
+  const scheduleDays =
+    draft.scheduleDays ??
+    (competition?.scheduleDays as Array<{ dayLabel: string; generationLabel: string; pitchId?: string | null; startTime: string; endTime: string }> | null) ??
+    [{ dayLabel: "Dan 1", generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }];
+  const pitchOptions = useMemo(
+    () =>
+      (venuesQuery.data ?? []).flatMap((venue) =>
+        venue.pitches.map((pitch) => ({
+          id: pitch.id,
+          generationLabel: pitch.generationLabel,
+          label: `${venue.name} - ${pitch.name} (${pitch.fieldLengthMeters}x${pitch.fieldWidthMeters} m, ${pitch.playerFormat})`,
+        }))
+      ),
+    [venuesQuery.data]
+  );
 
   const availableTeams = useMemo(
     () =>
@@ -71,6 +177,9 @@ export default function EditCompetitionPage() {
     [teamsQuery.data, selectedSport, teamSearch]
   );
   const seasonTeams = seasonSquadsQuery.data?.teams ?? [];
+  const seasonApplications = (applicationsQuery.data?.applications ?? []).filter(
+    (item) => item.competitionId === applicationsSeasonCompetitionId
+  );
   const activeSeasonTeamId = selectedSeasonTeamId ?? seasonTeams[0]?.teamId ?? null;
   const activeSeasonTeam = seasonTeams.find((team) => team.teamId === activeSeasonTeamId) ?? null;
   const activeRegistered = activeSeasonTeam
@@ -98,6 +207,9 @@ export default function EditCompetitionPage() {
       endDate: toIsoDate(draft.endDate ?? toDateInput(competition.endDate)),
       registrationDeadline: toIsoDate(draft.registrationDeadline ?? toDateInput(competition.registrationDeadline)),
       matchDurationMinutes: Number(draft.matchDurationMinutes ?? String(competition.matchDurationMinutes)),
+      stadiumName: draft.stadiumName ?? competition.stadiumName ?? "",
+      pitchNames: pitchNames.length ? pitchNames : ["Teren 1"],
+      scheduleDays,
       teamCount: Number(draft.teamCount ?? (competition.teamCount ? String(competition.teamCount) : "0")) || null,
       maxTeams: Number(draft.maxTeams ?? (competition.maxTeams ? String(competition.maxTeams) : "0")) || null,
       teamSize: Number(draft.teamSize ?? (competition.teamSize ? String(competition.teamSize) : "0")) || null,
@@ -119,6 +231,27 @@ export default function EditCompetitionPage() {
         You can only edit competitions that you created.
       </Card>
     );
+  }
+
+  function toggleApprovalGeneration(applicationId: string, generationYear: number) {
+    setApprovalDraft((current) => {
+      const selected = current[applicationId] ?? [];
+      const next = selected.includes(generationYear)
+        ? selected.filter((year) => year !== generationYear)
+        : [...selected, generationYear].sort((a, b) => b - a);
+      return { ...current, [applicationId]: next };
+    });
+  }
+
+  async function approveApplicationByGenerations(applicationId: string, fallbackYears: number[]) {
+    const years = approvalDraft[applicationId] ?? fallbackYears;
+    if (!years.length) return;
+    await approveApplication.mutateAsync({ applicationId, approvedGenerationYears: years });
+  }
+
+  function setStadiumBlocks(next: StadiumBlock[]) {
+    const encoded = encodeStadiumBlocks(next);
+    setDraft((current) => ({ ...current, stadiumName: encoded.stadiumName, pitchNames: encoded.pitchNames }));
   }
 
   function toggleSeasonPlayer(playerId: string) {
@@ -225,6 +358,182 @@ export default function EditCompetitionPage() {
               required
             />
           </FormField>
+          <div className="space-y-2">
+            <FormField label="Stadioni i tereni" tooltip="Dodaj jedan ili više stadiona i njihove terene.">
+              <div className="space-y-2">
+                {stadiumBlocks.map((stadium, stadiumIndex) => (
+                  <div key={`stadium-${stadiumIndex}`} className="space-y-2 rounded-lg border p-2" style={{ borderColor: "var(--border)" }}>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        placeholder={`Stadion ${stadiumIndex + 1}`}
+                        value={stadium.stadiumName}
+                        onChange={(event) => {
+                          const next = [...stadiumBlocks];
+                          next[stadiumIndex] = { ...next[stadiumIndex], stadiumName: event.target.value };
+                          setStadiumBlocks(next);
+                        }}
+                      />
+                      {stadiumBlocks.length > 1 ? (
+                        <Button
+                          type="button"
+                          onClick={() => {
+                            const next = stadiumBlocks.filter((_, index) => index !== stadiumIndex);
+                            setStadiumBlocks(next.length ? next : [{ stadiumName: "Stadion 1", pitchNames: ["Teren 1"] }]);
+                          }}
+                        >
+                          -
+                        </Button>
+                      ) : null}
+                    </div>
+                    {stadium.pitchNames.map((pitch, pitchIndex) => (
+                      <div key={`stadium-${stadiumIndex}-pitch-${pitchIndex}`} className="flex items-center gap-2 pl-2">
+                        <Input
+                          placeholder={`Teren ${pitchIndex + 1}`}
+                          value={pitch}
+                          onChange={(event) => {
+                            const next = [...stadiumBlocks];
+                            const nextPitches = [...next[stadiumIndex].pitchNames];
+                            nextPitches[pitchIndex] = event.target.value;
+                            next[stadiumIndex] = { ...next[stadiumIndex], pitchNames: nextPitches };
+                            setStadiumBlocks(next);
+                          }}
+                        />
+                        {stadium.pitchNames.length > 1 ? (
+                          <Button
+                            type="button"
+                            onClick={() => {
+                              const next = [...stadiumBlocks];
+                              const nextPitches = next[stadiumIndex].pitchNames.filter((_, index) => index !== pitchIndex);
+                              next[stadiumIndex] = { ...next[stadiumIndex], pitchNames: nextPitches.length ? nextPitches : ["Teren 1"] };
+                              setStadiumBlocks(next);
+                            }}
+                          >
+                            -
+                          </Button>
+                        ) : null}
+                      </div>
+                    ))}
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        const next = [...stadiumBlocks];
+                        next[stadiumIndex] = {
+                          ...next[stadiumIndex],
+                          pitchNames: [...next[stadiumIndex].pitchNames, `Teren ${next[stadiumIndex].pitchNames.length + 1}`],
+                        };
+                        setStadiumBlocks(next);
+                      }}
+                    >
+                      Dodaj teren
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  onClick={() => setStadiumBlocks([...stadiumBlocks, { stadiumName: `Stadion ${stadiumBlocks.length + 1}`, pitchNames: ["Teren 1"] }])}
+                >
+                  Dodaj stadion
+                </Button>
+              </div>
+            </FormField>
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <FormField label="Dani i satnica" tooltip="Dodaj dane turnira i vremenski opseg (od-do) za planiranje utakmica.">
+              <div className="space-y-2">
+                {scheduleDays.map((day, index) => (
+                  <div key={`${index}-${day.dayLabel}`} className="grid gap-2 md:grid-cols-[1fr_220px_1fr_130px_130px_auto]">
+                    <Input
+                      value={day.dayLabel}
+                      onChange={(event) => {
+                        const next = [...scheduleDays];
+                        next[index] = { ...next[index], dayLabel: event.target.value };
+                        setDraft((current) => ({ ...current, scheduleDays: next }));
+                      }}
+                    />
+                    <Select
+                      value={day.generationLabel}
+                      onChange={(event) => {
+                        const next = [...scheduleDays];
+                        const generationLabel = event.target.value;
+                        const compatiblePitch = pitchOptions.find((pitch) => pitch.generationLabel === generationLabel);
+                        next[index] = { ...next[index], generationLabel, pitchId: compatiblePitch?.id ?? next[index].pitchId ?? null };
+                        setDraft((current) => ({ ...current, scheduleDays: next }));
+                      }}
+                    >
+                      {generationOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </Select>
+                    <Select
+                      value={day.pitchId ?? ""}
+                      onChange={(event) => {
+                        const next = [...scheduleDays];
+                        next[index] = { ...next[index], pitchId: event.target.value || null };
+                        setDraft((current) => ({ ...current, scheduleDays: next }));
+                      }}
+                    >
+                      <option value="">Izaberi teren</option>
+                      {pitchOptions
+                        .slice()
+                        .sort((a, b) => {
+                          const aMatch = a.generationLabel === day.generationLabel ? 0 : 1;
+                          const bMatch = b.generationLabel === day.generationLabel ? 0 : 1;
+                          if (aMatch !== bMatch) return aMatch - bMatch;
+                          return a.label.localeCompare(b.label);
+                        })
+                        .map((pitch) => (
+                          <option key={pitch.id} value={pitch.id}>
+                            {pitch.label}
+                          </option>
+                        ))}
+                    </Select>
+                    <Input
+                      type="time"
+                      value={day.startTime}
+                      onChange={(event) => {
+                        const next = [...scheduleDays];
+                        next[index] = { ...next[index], startTime: event.target.value };
+                        setDraft((current) => ({ ...current, scheduleDays: next }));
+                      }}
+                    />
+                    <Input
+                      type="time"
+                      value={day.endTime}
+                      onChange={(event) => {
+                        const next = [...scheduleDays];
+                        next[index] = { ...next[index], endTime: event.target.value };
+                        setDraft((current) => ({ ...current, scheduleDays: next }));
+                      }}
+                    />
+                    {scheduleDays.length > 1 ? (
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          const next = scheduleDays.filter((_, itemIndex) => itemIndex !== index);
+                          setDraft((current) => ({ ...current, scheduleDays: next.length ? next : [{ dayLabel: "Dan 1", generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }] }));
+                        }}
+                      >
+                        -
+                      </Button>
+                    ) : null}
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  onClick={() =>
+                    setDraft((current) => ({
+                      ...current,
+                      scheduleDays: [...scheduleDays, { dayLabel: `Dan ${scheduleDays.length + 1}`, generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }],
+                    }))
+                  }
+                >
+                  Dodaj dan
+                </Button>
+              </div>
+            </FormField>
+          </div>
           <FormField label="Location" tooltip="Competition location or city.">
             <Input
               value={draft.location ?? competition.location ?? ""}
@@ -457,6 +766,89 @@ export default function EditCompetitionPage() {
               </p>
             )}
           </div>
+        </div>
+      </Card>
+      <Card className="space-y-3 p-6">
+        <h3 className="text-lg font-semibold">Prijavljene ekipe</h3>
+        <div className="max-w-sm">
+          <FormField label="Season select">
+            <Select
+              value={applicationsSeasonCompetitionId}
+              onChange={(event) => setApplicationsSeasonCompetitionId(event.currentTarget.value)}
+            >
+              {(applicationsQuery.data?.seasonOptions ?? []).map((item) => (
+                <option key={item.competitionId} value={item.competitionId}>
+                  {item.seasonLabel ?? "No season"}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        </div>
+        <div className="space-y-2">
+          {seasonApplications.map((application) => {
+            const selectedYears = approvalDraft[application.id] ?? application.generations.filter((item) => item.isApproved ?? item.isRequested).map((item) => item.generationYear);
+            return (
+              <div key={application.id} className="rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-medium">{application.teamName}</p>
+                  <span className="text-xs" style={{ color: "var(--text-secondary)" }}>{application.status}</span>
+                </div>
+                <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                  {application.seasonLabel ?? "N/A"} • {new Date(application.submittedAt).toLocaleDateString("sr-Latn-RS")}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {application.generations.map((generation) => (
+                    <button
+                      key={`${application.id}-${generation.generationYear}`}
+                      type="button"
+                      className="rounded-lg border px-2 py-1 text-xs"
+                      style={
+                        selectedYears.includes(generation.generationYear)
+                          ? { borderColor: "var(--primary)", color: "var(--primary)" }
+                          : { borderColor: "var(--border)", color: "var(--text-secondary)" }
+                      }
+                      onClick={() => toggleApprovalGeneration(application.id, generation.generationYear)}
+                    >
+                      {generation.generationYear}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 flex justify-end">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={approveApplication.isPending}
+                    onClick={() => void approveApplicationByGenerations(application.id, application.generations.map((item) => item.generationYear))}
+                  >
+                    Odobri učešće
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+          {seasonApplications.length === 0 ? (
+            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+              Nema prijava za izabranu sezonu.
+            </p>
+          ) : null}
+        </div>
+      </Card>
+      <Card className="space-y-3 p-6">
+        <h3 className="text-lg font-semibold">Učesnici po generacijama</h3>
+        <div className="space-y-2">
+          {(generationParticipantsQuery.data?.participants ?? []).map((participant) => (
+            <div key={participant.teamId} className="rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
+              <p className="font-medium">{participant.teamName}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {participant.generationYears.map((year) => (
+                  <span key={`${participant.teamId}-${year}`} className="rounded-full border px-2 py-0.5 text-xs" style={{ borderColor: "var(--border)" }}>
+                    Generacija {year}
+                  </span>
+                ))}
+                {!participant.generationYears.length ? <span className="text-xs" style={{ color: "var(--text-secondary)" }}>Bez generacija</span> : null}
+              </div>
+            </div>
+          ))}
         </div>
       </Card>
     </div>

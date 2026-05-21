@@ -36,6 +36,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       sport: formData.get("sport") || undefined,
       name: formData.get("name") || undefined,
       shortName: formData.get("shortName") || undefined,
+      place: formData.get("place") || undefined,
       city: formData.get("city") || undefined,
       country: formData.get("country") || undefined,
       coach: formData.get("coach") || undefined,

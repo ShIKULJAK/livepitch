@@ -41,6 +41,8 @@ export default function EditMatchPage() {
     homeTeamId?: string;
     awayTeamId?: string;
     venueId?: string;
+    venueLabel?: string;
+    pitchName?: string;
     round?: string;
     date?: string;
     time?: string;
@@ -57,6 +59,11 @@ export default function EditMatchPage() {
     if (!competition) return teamsQuery.data ?? [];
     return (teamsQuery.data ?? []).filter((team) => team.sport === competition.sport);
   }, [selectedCompetitionId, competitionsQuery.data, teamsQuery.data]);
+  const selectedCompetition = useMemo(
+    () => (competitionsQuery.data ?? []).find((item) => item.id === selectedCompetitionId),
+    [selectedCompetitionId, competitionsQuery.data]
+  );
+  const availablePitches = selectedCompetition?.pitchNames?.length ? selectedCompetition.pitchNames : ["Teren 1"];
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -64,12 +71,16 @@ export default function EditMatchPage() {
 
     const date = draft.date ?? toDateInput(match.scheduledAt);
     const time = draft.time ?? toTimeInput(match.scheduledAt);
+    const effectivePitch = draft.pitchName ?? match.pitchName ?? availablePitches[0];
+    const effectiveStadium = draft.venueLabel ?? match.venueLabel ?? selectedCompetition?.stadiumName ?? "";
 
     await updateMatch.mutateAsync({
       competitionId: draft.competitionId ?? match.competitionId,
       homeTeamId: draft.homeTeamId ?? match.homeTeam.id,
       awayTeamId: draft.awayTeamId ?? match.awayTeam.id,
       venueId: draft.venueId ?? match.venueId ?? null,
+      venueLabel: effectiveStadium ? `${effectiveStadium} - ${effectivePitch}` : null,
+      pitchName: effectivePitch,
       round: draft.round ?? match.round ?? null,
       scheduledAt: toIsoDate(date, time),
       status: draft.status ?? match.status,
@@ -178,6 +189,30 @@ export default function EditMatchPage() {
               }}
               required
             />
+          </FormField>
+          <FormField label="Stadium" tooltip="Main stadium for this match venue label.">
+            <Input
+              value={draft.venueLabel ?? match.venueLabel?.split(" - ")[0] ?? selectedCompetition?.stadiumName ?? ""}
+              onChange={(event) => {
+                const value = event.target.value;
+                setDraft((current) => ({ ...current, venueLabel: value }));
+              }}
+            />
+          </FormField>
+          <FormField label="Pitch" tooltip="Pitch inside selected stadium.">
+            <Select
+              value={draft.pitchName ?? match.pitchName ?? availablePitches[0]}
+              onChange={(event) => {
+                const value = event.target.value;
+                setDraft((current) => ({ ...current, pitchName: value }));
+              }}
+            >
+              {availablePitches.map((pitch) => (
+                <option key={pitch} value={pitch}>
+                  {pitch}
+                </option>
+              ))}
+            </Select>
           </FormField>
           <FormField label="Venue" tooltip="Match venue.">
             <Select

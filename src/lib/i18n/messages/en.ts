@@ -21,6 +21,7 @@ export const enMessages: Messages = {
   "nav.teams": "Teams",
   "nav.players": "Players",
   "nav.favorites": "Favorites",
+  "nav.teamApplication": "Apply Team",
   "nav.draws": "Draws",
   "nav.schedule": "Schedule",
   "nav.standings": "Standings",

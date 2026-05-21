@@ -24,6 +24,7 @@ export default function CreateTeamPage() {
   const [sport, setSport] = useState<SportType>(SportType.FOOTBALL);
   const [name, setName] = useState("");
   const [shortName, setShortName] = useState("");
+  const [place, setPlace] = useState("");
   const [city, setCity] = useState("");
   const [country, setCountry] = useState("");
   const [coach, setCoach] = useState("");
@@ -38,6 +39,7 @@ export default function CreateTeamPage() {
     formData.set("sport", sport);
     formData.set("name", name);
     formData.set("shortName", shortName);
+    formData.set("place", place);
     formData.set("city", city);
     formData.set("country", country);
     formData.set("coach", coach);
@@ -61,7 +63,7 @@ export default function CreateTeamPage() {
       <Card className="p-6">
         <form className="grid gap-3 md:grid-cols-2" onSubmit={(event) => void onSubmit(event)}>
           <FormField label="Sport" tooltip="Sport category for this team." required>
-            <Select value={sport} onChange={(event) => setSport(event.currentTarget.value as SportType)}>
+            <Select value={sport} onChange={(event) => setSport(event.currentTarget.value as SportType)} required>
               {SPORT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -72,15 +74,12 @@ export default function CreateTeamPage() {
           <FormField label="Team Name" tooltip="Official full team name used in fixtures and standings." required>
             <Input placeholder="Team Name" value={name} onChange={(event) => setName(event.currentTarget.value)} required />
           </FormField>
-          <FormField label="Short Name" tooltip="Compact team name used where space is limited.">
-            <Input placeholder="Short Name" value={shortName} onChange={(event) => setShortName(event.currentTarget.value)} />
-          </FormField>
-          <FormField label="City" tooltip="Home city of the team.">
-            <Input placeholder="City" value={city} onChange={(event) => setCity(event.currentTarget.value)} />
+          <FormField label="Short Name" tooltip="Compact team name used where space is limited." required>
+            <Input placeholder="Short Name" value={shortName} onChange={(event) => setShortName(event.currentTarget.value)} required />
           </FormField>
           <div className="space-y-1">
-            <FormField label="Country" tooltip="Country the club represents. Search and select from list.">
-              <Input list="country-list" placeholder="Country" value={country} onChange={(event) => setCountry(event.currentTarget.value)} />
+            <FormField label="Country" tooltip="Country the club represents. Search and select from list." required>
+              <Input list="country-list" placeholder="Country" value={country} onChange={(event) => setCountry(event.currentTarget.value)} required />
             </FormField>
             <datalist id="country-list">
               {COUNTRY_OPTIONS.map((option) => (
@@ -95,8 +94,16 @@ export default function CreateTeamPage() {
               </p>
             ) : null}
           </div>
-          <FormField label="Coach" tooltip="Head coach or manager of this team.">
-            <Input placeholder="Coach" value={coach} onChange={(event) => setCoach(event.currentTarget.value)} />
+          <div className="grid gap-3 md:grid-cols-2 md:col-start-2">
+            <FormField label="City" tooltip="Home city of the team." required>
+              <Input placeholder="City" value={city} onChange={(event) => setCity(event.currentTarget.value)} required />
+            </FormField>
+            <FormField label="Mjesto" tooltip="Naselje/selo/manje mjesto odakle je ekipa.">
+              <Input placeholder="Mjesto" value={place} onChange={(event) => setPlace(event.currentTarget.value)} />
+            </FormField>
+          </div>
+          <FormField label="Coach" tooltip="Head coach or manager of this team." required>
+            <Input placeholder="Coach" value={coach} onChange={(event) => setCoach(event.currentTarget.value)} required />
           </FormField>
           <FormField label="Team Profile Image" tooltip="Upload PNG/JPG/WEBP. Image is auto-resized to 150x150 and compressed to <=300KB.">
             <Input

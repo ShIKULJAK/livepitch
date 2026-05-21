@@ -107,6 +107,13 @@ enum NotificationEntityType {
   COMPETITION
 }
 
+enum TeamApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
 model Organization {
   id           String        @id @default(cuid())
   name         String
@@ -119,6 +126,7 @@ model Organization {
   users        User[]
   teams        Team[]
   venues       Venue[]
+  pitches      Pitch[]
   competitions Competition[]
   seasons      Season[]
 }
@@ -168,8 +176,28 @@ model Venue {
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   matches        Match[]
   competitions   Competition[]
+  pitches        Pitch[]
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
+}
+
+model Pitch {
+  id                String   @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  venueId           String?
+  venue             Venue?   @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  name              String
+  generationLabel   String?
+  ageGroupCode      String?
+  playerFormat      String
+  fieldLengthMeters Int
+  fieldWidthMeters  Int
+  goalWidthMeters   Float?
+  goalHeightMeters  Float?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 model Team {
@@ -177,6 +205,7 @@ model Team {
   sport          SportType          @default(FOOTBALL)
   name           String
   shortName      String?
+  place          String?
   city           String?
   country        String?
   coach          String?
@@ -198,6 +227,8 @@ model Team {
   drawKnockoutHomeMatches   DrawKnockoutMatch[] @relation("DrawKnockoutHomeTeam")
   drawKnockoutAwayMatches   DrawKnockoutMatch[] @relation("DrawKnockoutAwayTeam")
   drawKnockoutWinnerMatches DrawKnockoutMatch[] @relation("DrawKnockoutWinnerTeam")
+  applications              TeamApplication[]
+  generationParticipations  CompetitionTeamGeneration[]
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 }
@@ -248,6 +279,9 @@ model Competition {
   teamSize              Int?
   substitutions         Int?
   matchDurationMinutes  Int                @default(90)
+  stadiumName           String?
+  pitchNames            String[]           @default(["Teren 1"])
+  scheduleDays          Json?
   visibility            String?            @default("public")
   createdById           String?
   organizationId        String
@@ -263,6 +297,8 @@ model Competition {
   standings             Standing[]
   registrations         Registration[]
   draws                 Draw[]
+  teamApplications      TeamApplication[]
+  teamGenerations       CompetitionTeamGeneration[]
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
 }
@@ -278,6 +314,89 @@ model CompetitionTeam {
   team           Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@unique([competitionId, teamId])
+}
+
+model CompetitionTeamGeneration {
+  id             String   @id @default(cuid())
+  competitionId  String
+  competition    Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  teamId         String
+  team           Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  generationYear Int
+  ageGroupLabel  String?
+  isApproved     Boolean  @default(true)
+  approvedAt     DateTime?
+  approvedById   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([competitionId, teamId, generationYear])
+  @@index([competitionId, generationYear, isApproved])
+}
+
+model TeamApplication {
+  id                String                @id @default(cuid())
+  competitionId     String
+  competition       Competition           @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  teamId            String?
+  team              Team?                 @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  teamName          String
+  place             String
+  submittedAt       DateTime              @default(now())
+  status            TeamApplicationStatus @default(PENDING)
+  submittedByUserId String?
+  approvedAt        DateTime?
+  approvedByUserId  String?
+  submittedDate     DateTime
+  generations       TeamApplicationGeneration[]
+  players           ApplicationPlayer[]
+  coaches           ApplicationCoach[]
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@index([competitionId, status, submittedAt])
+}
+
+model TeamApplicationGeneration {
+  id             String          @id @default(cuid())
+  applicationId  String
+  application    TeamApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  generationYear Int
+  isRequested    Boolean         @default(true)
+  isApproved     Boolean?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([applicationId, generationYear])
+}
+
+model ApplicationPlayer {
+  id            String          @id @default(cuid())
+  applicationId String
+  application   TeamApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  generationYear Int
+  birthYear     Int
+  jerseyNumber  Int
+  fullName      String
+  order         Int
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([applicationId, generationYear, order])
+}
+
+model ApplicationCoach {
+  id            String          @id @default(cuid())
+  applicationId String
+  application   TeamApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  fullName      String
+  phone         String
+  email         String?
+  order         Int
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([applicationId, order])
 }
 
 model CompetitionSeasonTeamPlayer {
@@ -322,6 +441,9 @@ model Match {
   awayTeam         Team         @relation("AwayTeam", fields: [awayTeamId], references: [id], onDelete: Restrict)
   venueId          String?
   venue            Venue?       @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  venueLabel       String?
+  pitchName        String?
+  generationYear   Int?
   round            String?
   scheduledAt      DateTime
   status           MatchStatus  @default(SCHEDULED)
@@ -336,7 +458,7 @@ model Match {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  @@index([competitionId, stage, drawId])
+  @@index([competitionId, stage, drawId, generationYear])
 }
 
 model MatchEvent {
@@ -465,6 +587,7 @@ model Draw {
   id                     String              @id @default(cuid())
   competitionId          String
   competition            Competition         @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  generationYear         Int?
   groupStageEnabled      Boolean             @default(true)
   groupsCount            Int                 @default(4)
   roundOf16Enabled       Boolean             @default(false)
@@ -477,7 +600,7 @@ model Draw {
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
 
-  @@unique([competitionId])
+  @@unique([competitionId, generationYear])
 }
 
 model DrawGroup {

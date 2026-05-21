@@ -7,7 +7,10 @@ import { drawConfigSchema } from "@/lib/validation/draw";
 export async function GET(_: Request, { params }: { params: Promise<{ competitionId: string }> }) {
   const currentUser = await requireAuth();
   const { competitionId } = await params;
-  const data = await getDrawByCompetition(currentUser.organizationId, competitionId);
+  const requestUrl = new URL(_.url);
+  const generationYearRaw = requestUrl.searchParams.get("generationYear");
+  const generationYear = generationYearRaw ? Number(generationYearRaw) : undefined;
+  const data = await getDrawByCompetition(currentUser.organizationId, competitionId, Number.isFinite(generationYear) ? generationYear : undefined);
 
   if (!data) {
     return NextResponse.json({ error: "Competition not found" }, { status: 404 });

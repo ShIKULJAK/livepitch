@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const drawConfigSchema = z
   .object({
+    generationYear: z.number().int().min(1900).max(3000).optional(),
     groupStageEnabled: z.boolean().default(true),
     groupsCount: z.number().int().min(1).max(32).default(4),
     roundOf16Enabled: z.boolean().default(false),

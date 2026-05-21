@@ -115,7 +115,7 @@ async function syncDrawKnockoutProgress(
 async function assertCompetitionOwnership(organizationId: string, competitionId: string) {
   return prisma.competition.findFirst({
     where: { id: competitionId, organizationId },
-    select: { id: true, seasonId: true, matchDurationMinutes: true, createdById: true },
+    select: { id: true, seasonId: true, matchDurationMinutes: true, createdById: true, stadiumName: true, pitchNames: true },
   });
 }
 
@@ -141,7 +141,7 @@ async function resolveCompetitionForCreate(organizationId: string, competitionId
       sport: homeTeam.sport,
       name: "Friendly Game",
     },
-    select: { id: true, seasonId: true, matchDurationMinutes: true },
+    select: { id: true, seasonId: true, matchDurationMinutes: true, stadiumName: true, pitchNames: true },
   });
 
   if (existingFriendlyCompetition) return existingFriendlyCompetition;
@@ -158,12 +158,14 @@ async function resolveCompetitionForCreate(organizationId: string, competitionId
       matchDurationMinutes: 90,
       visibility: "public",
     },
-    select: { id: true, seasonId: true, matchDurationMinutes: true },
+    select: { id: true, seasonId: true, matchDurationMinutes: true, stadiumName: true, pitchNames: true },
   });
 }
 
 export async function createMatch(organizationId: string, actorId: string, input: MatchInput) {
   const competition = await resolveCompetitionForCreate(organizationId, input.competitionId, input.homeTeamId, actorId);
+  const defaultPitch = competition.pitchNames?.[0] ?? "Teren 1";
+  const venueLabel = input.venueLabel ?? (competition.stadiumName ? `${competition.stadiumName} - ${input.pitchName ?? defaultPitch}` : null);
 
   return prisma.match.create({
     data: {
@@ -172,6 +174,8 @@ export async function createMatch(organizationId: string, actorId: string, input
       homeTeamId: input.homeTeamId,
       awayTeamId: input.awayTeamId,
       venueId: input.venueId ?? null,
+      pitchName: input.pitchName ?? defaultPitch,
+      venueLabel,
       round: input.round ?? null,
       scheduledAt: new Date(input.scheduledAt),
       status: input.status ?? "SCHEDULED",
@@ -187,7 +191,7 @@ export async function createMatch(organizationId: string, actorId: string, input
 export async function updateMatch(organizationId: string, actor: { id: string; role: string }, matchId: string, input: MatchUpdate) {
   const existing = await prisma.match.findFirst({
     where: { id: matchId, competition: { organizationId } },
-    select: { id: true, status: true, createdById: true },
+    select: { id: true, status: true, createdById: true, pitchName: true, venueLabel: true },
   });
 
   if (!existing) return null;
@@ -208,6 +212,8 @@ export async function updateMatch(organizationId: string, actor: { id: string; r
       ...(input.homeTeamId !== undefined ? { homeTeamId: input.homeTeamId } : {}),
       ...(input.awayTeamId !== undefined ? { awayTeamId: input.awayTeamId } : {}),
       ...(input.venueId !== undefined ? { venueId: input.venueId } : {}),
+      ...(input.pitchName !== undefined ? { pitchName: input.pitchName } : {}),
+      ...(input.venueLabel !== undefined ? { venueLabel: input.venueLabel } : {}),
       ...(input.round !== undefined ? { round: input.round } : {}),
       ...(input.scheduledAt !== undefined ? { scheduledAt: new Date(input.scheduledAt) } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),

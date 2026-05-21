@@ -71,6 +71,7 @@ export default function TournamentsPage() {
   const deleteCompetition = useDeleteCompetition();
   const { user } = useCurrentUser();
   const canManage = canCreateCompetitions(user?.role);
+  const isLoadingCompetitions = competitionsQuery.isLoading || competitionsQuery.isFetching;
 
   return (
     <div className="space-y-4">
@@ -119,7 +120,7 @@ export default function TournamentsPage() {
         </Button>
       </FilterBar>
 
-      {competitionsQuery.isLoading ? (
+      {isLoadingCompetitions ? (
         <Card className="p-5 text-sm" style={{ color: "var(--text-secondary)" }}>
           {t("common.loading")}
         </Card>
@@ -186,7 +187,7 @@ export default function TournamentsPage() {
         ))}
       </div>
 
-      {competitionsQuery.data?.length === 0 && !competitionsQuery.isLoading ? (
+      {competitionsQuery.data?.length === 0 && !isLoadingCompetitions ? (
         <Card className="p-5 text-sm" style={{ color: "var(--text-secondary)" }}>
           {t("tournaments.empty")}
         </Card>

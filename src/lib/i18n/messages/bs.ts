@@ -21,6 +21,7 @@ export const bsMessages: Messages = {
   "nav.teams": "Timovi",
   "nav.players": "Igrači",
   "nav.favorites": "Favoriti",
+  "nav.teamApplication": "Prijavi ekipu",
   "nav.draws": "Izvlačenje",
   "nav.schedule": "Raspored",
   "nav.standings": "Tabela",

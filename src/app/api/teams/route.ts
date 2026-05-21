@@ -43,6 +43,7 @@ export async function POST(request: Request) {
       sport: formData.get("sport"),
       name: formData.get("name"),
       shortName: formData.get("shortName") || null,
+      place: formData.get("place") || null,
       city: formData.get("city") || null,
       country: formData.get("country") || null,
       coach: formData.get("coach") || null,

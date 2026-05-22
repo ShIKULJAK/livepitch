@@ -50,6 +50,7 @@ export default function VenuesPage() {
   const [draft, setDraft] = useState<PitchDraft>(toDraft());
   const [venueDraft, setVenueDraft] = useState({ id: "", name: "", city: "", country: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [expandedVenueIds, setExpandedVenueIds] = useState<string[]>([]);
 
   const venues = venuesQuery.data ?? [];
   const allPitches = useMemo(
@@ -62,6 +63,12 @@ export default function VenuesPage() {
       ),
     [venues]
   );
+
+  function toggleVenueExpanded(venueId: string) {
+    setExpandedVenueIds((current) =>
+      current.includes(venueId) ? current.filter((id) => id !== venueId) : [...current, venueId]
+    );
+  }
 
   function applyPreset(generationLabel: string) {
     const preset = getGenerationPreset(generationLabel);
@@ -133,61 +140,87 @@ export default function VenuesPage() {
           <div className="mb-3 space-y-2">
             {venues.map((venue) => (
               <div key={venue.id} className="rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
-                <p className="font-medium">{venue.name}</p>
-                <p className="text-xs" style={{ color: "var(--text-secondary)" }}>{venue.city}, {venue.country}</p>
-                <div className="mt-2 flex gap-2">
-                  <Button type="button" onClick={() => setVenueDraft({ id: venue.id, name: venue.name, city: venue.city ?? "", country: venue.country ?? "" })}>
-                    Edit stadion
-                  </Button>
-                  <Button type="button" variant="danger" onClick={() => deleteVenue.mutate(venue.id)}>
-                    Delete stadion
-                  </Button>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-medium">{venue.name}</p>
+                    <p className="text-xs" style={{ color: "var(--text-secondary)" }}>{venue.city}, {venue.country}</p>
+                    <p className="text-xs" style={{ color: "var(--text-secondary)" }}>Terena: {venue.pitches.length}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" onClick={() => toggleVenueExpanded(venue.id)}>
+                      {expandedVenueIds.includes(venue.id) ? "Sakrij terene" : "Prikaži terene"}
+                    </Button>
+                    <Button type="button" onClick={() => setVenueDraft({ id: venue.id, name: venue.name, city: venue.city ?? "", country: venue.country ?? "" })}>
+                      Edit stadion
+                    </Button>
+                    <Button type="button" variant="danger" onClick={() => deleteVenue.mutate(venue.id)}>
+                      Delete stadion
+                    </Button>
+                  </div>
                 </div>
+                {expandedVenueIds.includes(venue.id) ? (
+                  <div className="mt-3 space-y-2 rounded-lg border p-2" style={{ borderColor: "var(--border)" }}>
+                    <p className="text-sm font-medium">Tereni</p>
+                    {venue.pitches.length ? (
+                      venue.pitches.map((pitch) => (
+                        <div key={pitch.id} className="rounded-lg border p-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface)" }}>
+                          <p className="text-sm font-medium">{pitch.name}</p>
+                          <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                            {pitch.fieldLengthMeters} x {pitch.fieldWidthMeters} m · {pitch.playerFormat}
+                            {pitch.generationLabel ? ` · ${pitch.generationLabel}` : ""}
+                          </p>
+                          <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                            Gol: {pitch.goalWidthMeters ?? "-"} x {pitch.goalHeightMeters ?? "-"} m
+                          </p>
+                          <div className="mt-2 flex gap-2">
+                            <Button
+                              type="button"
+                              onClick={() => {
+                                setEditingId(pitch.id);
+                                setDraft(
+                                  toDraft({
+                                    id: pitch.id,
+                                    venueId: pitch.venueId ?? venue.id,
+                                    name: pitch.name,
+                                    generationLabel: pitch.generationLabel ?? "",
+                                    ageGroupCode: pitch.ageGroupCode ?? "",
+                                    playerFormat: pitch.playerFormat,
+                                    fieldLengthMeters: String(pitch.fieldLengthMeters),
+                                    fieldWidthMeters: String(pitch.fieldWidthMeters),
+                                    goalWidthMeters: pitch.goalWidthMeters ? String(pitch.goalWidthMeters) : "",
+                                    goalHeightMeters: pitch.goalHeightMeters ? String(pitch.goalHeightMeters) : "",
+                                  })
+                                );
+                              }}
+                            >
+                              Edit teren
+                            </Button>
+                            <Button type="button" variant="danger" onClick={() => deletePitch.mutate(pitch.id)}>
+                              Delete teren
+                            </Button>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs" style={{ color: "var(--text-secondary)" }}>Nema terena za ovaj stadion.</p>
+                    )}
+                    <Button
+                      type="button"
+                      onClick={() =>
+                        setDraft((current) => ({
+                          ...current,
+                          venueId: venue.id,
+                        }))
+                      }
+                    >
+                      Dodaj teren u stadion
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
-          <div className="space-y-2">
-            {allPitches.map((pitch) => (
-              <div key={pitch.id} className="rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
-                <p className="font-medium">{pitch.venueName} - {pitch.name}</p>
-                <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                  {pitch.fieldLengthMeters} x {pitch.fieldWidthMeters} m · {pitch.playerFormat}
-                  {pitch.generationLabel ? ` · ${pitch.generationLabel}` : ""}
-                </p>
-                <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                  Gol: {pitch.goalWidthMeters ?? "-"} x {pitch.goalHeightMeters ?? "-"} m
-                </p>
-                <div className="mt-2 flex gap-2">
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      setEditingId(pitch.id);
-                      setDraft(
-                        toDraft({
-                          id: pitch.id,
-                          venueId: pitch.venueId ?? "",
-                          name: pitch.name,
-                          generationLabel: pitch.generationLabel ?? "",
-                          ageGroupCode: pitch.ageGroupCode ?? "",
-                          playerFormat: pitch.playerFormat,
-                          fieldLengthMeters: String(pitch.fieldLengthMeters),
-                          fieldWidthMeters: String(pitch.fieldWidthMeters),
-                          goalWidthMeters: pitch.goalWidthMeters ? String(pitch.goalWidthMeters) : "",
-                          goalHeightMeters: pitch.goalHeightMeters ? String(pitch.goalHeightMeters) : "",
-                        })
-                      );
-                    }}
-                  >
-                    Edit
-                  </Button>
-                  <Button type="button" variant="danger" onClick={() => deletePitch.mutate(pitch.id)}>
-                    Delete
-                  </Button>
-                </div>
-              </div>
-            ))}
-            {!allPitches.length ? <p className="text-sm" style={{ color: "var(--text-secondary)" }}>Nema unesenih terena.</p> : null}
-          </div>
+          {!allPitches.length ? <p className="text-sm" style={{ color: "var(--text-secondary)" }}>Nema unesenih terena.</p> : null}
         </Card>
 
         <Card className="p-4">

@@ -62,44 +62,145 @@ export async function submitTeamApplication(
   });
   const uniqueCoaches = input.coaches.map((item, index) => ({
     fullName: item.fullName.trim(),
-    phone: item.phone.trim(),
+    phone: item.phone?.trim() ?? "",
     email: item.email?.trim() ? item.email.trim() : null,
     order: index + 1,
   }));
 
-  return prisma.teamApplication.create({
-    data: {
-      competitionId: competition.id,
-      teamId: input.teamId ?? null,
-      teamName: input.teamName.trim(),
-      place: input.place.trim(),
-      submittedDate: new Date(`${input.submittedDate}T00:00:00.000Z`),
-      submittedByUserId,
-      submittedAt: new Date(),
-      generations: {
-        createMany: {
-          data: uniqueYears.map((generationYear) => ({
-            generationYear,
-            isRequested: true,
-          })),
-        },
+  const normalizedTeamName = input.teamName.trim();
+  const normalizeName = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
+  const normalizedTeamNameKey = normalizeName(normalizedTeamName);
+  const now = new Date();
+  const submittedDate = new Date(`${input.submittedDate}T00:00:00.000Z`);
+
+  return prisma.$transaction(async (tx) => {
+    const existingApplications = await tx.teamApplication.findMany({
+      where: {
+        competitionId: competition.id,
+        ...(input.teamId ? { OR: [{ teamId: input.teamId }, { teamName: { contains: normalizedTeamName } }] } : {}),
       },
-      players: {
-        createMany: {
-          data: uniquePlayers,
+      select: { id: true, teamName: true, submittedAt: true },
+    });
+    const nameMatched = existingApplications.filter((item) => normalizeName(item.teamName) === normalizedTeamNameKey);
+    const fallbackByName = nameMatched.length
+      ? nameMatched
+      : await tx.teamApplication.findMany({
+          where: { competitionId: competition.id },
+          select: { id: true, teamName: true, submittedAt: true },
+        }).then((items) => items.filter((item) => normalizeName(item.teamName) === normalizedTeamNameKey));
+
+    const dedupedCandidates = [...nameMatched, ...fallbackByName].filter(
+      (item, index, array) => array.findIndex((entry) => entry.id === item.id) === index
+    );
+    const existingApplication = dedupedCandidates
+      .sort((a, b) => b.submittedAt.getTime() - a.submittedAt.getTime())[0];
+
+    if (dedupedCandidates.length > 1) {
+      const duplicateIds = dedupedCandidates.filter((item) => item.id !== existingApplication.id).map((item) => item.id);
+      if (duplicateIds.length) {
+        await tx.teamApplication.deleteMany({
+          where: {
+            id: { in: duplicateIds },
+          },
+        });
+      }
+    }
+
+    if (!existingApplication) {
+      return tx.teamApplication.create({
+        data: {
+          competitionId: competition.id,
+          teamId: input.teamId ?? null,
+          teamName: normalizedTeamName,
+          place: input.place.trim(),
+          submittedDate,
+          submittedByUserId,
+          submittedAt: now,
+          generations: {
+            createMany: {
+              data: uniqueYears.map((generationYear) => ({
+                generationYear,
+                isRequested: true,
+              })),
+            },
+          },
+          players: {
+            createMany: {
+              data: uniquePlayers,
+            },
+          },
+          coaches: {
+            createMany: {
+              data: uniqueCoaches,
+            },
+          },
         },
-      },
-      coaches: {
-        createMany: {
-          data: uniqueCoaches,
+        include: {
+          generations: true,
+          players: true,
+          coaches: true,
         },
+      });
+    }
+
+    await tx.teamApplicationGeneration.deleteMany({ where: { applicationId: existingApplication.id } });
+    await tx.applicationPlayer.deleteMany({ where: { applicationId: existingApplication.id } });
+    await tx.applicationCoach.deleteMany({ where: { applicationId: existingApplication.id } });
+
+    const updated = await tx.teamApplication.update({
+      where: { id: existingApplication.id },
+      data: {
+        teamId: input.teamId ?? null,
+        teamName: normalizedTeamName,
+        place: input.place.trim(),
+        submittedDate,
+        submittedByUserId,
+        submittedAt: now,
+        status: TeamApplicationStatus.PENDING,
+        approvedAt: null,
+        approvedByUserId: null,
       },
-    },
-    include: {
-      generations: true,
-      players: true,
-      coaches: true,
-    },
+    });
+
+    if (uniqueYears.length) {
+      await tx.teamApplicationGeneration.createMany({
+        data: uniqueYears.map((generationYear) => ({
+          applicationId: existingApplication.id,
+          generationYear,
+          isRequested: true,
+        })),
+      });
+    }
+
+    if (uniquePlayers.length) {
+      await tx.applicationPlayer.createMany({
+        data: uniquePlayers.map((player) => ({
+          applicationId: existingApplication.id,
+          generationYear: player.generationYear,
+          birthYear: player.birthYear,
+          jerseyNumber: player.jerseyNumber,
+          fullName: player.fullName,
+          order: player.order,
+        })),
+      });
+    }
+
+    if (uniqueCoaches.length) {
+      await tx.applicationCoach.createMany({
+        data: uniqueCoaches.map((coach) => ({
+          applicationId: existingApplication.id,
+          fullName: coach.fullName,
+          phone: coach.phone,
+          email: coach.email,
+          order: coach.order,
+        })),
+      });
+    }
+
+    return tx.teamApplication.findUniqueOrThrow({
+      where: { id: updated.id },
+      include: { generations: true, players: true, coaches: true },
+    });
   });
 }
 
@@ -251,6 +352,43 @@ export async function approveTeamApplicationGenerations(
         },
       });
     }
+  });
+
+  return { ok: true };
+}
+
+export async function rejectTeamApplication(
+  organizationId: string,
+  actor: { id: string; role: string },
+  competitionId: string,
+  input: { applicationId: string }
+) {
+  const competition = await prisma.competition.findFirst({
+    where: { id: competitionId, organizationId },
+    select: { id: true, createdById: true },
+  });
+  if (!competition) return null;
+  if (!canCreateCompetitions(actor.role) || !canEditEntity(actor, competition)) throw new Error("Forbidden");
+
+  const application = await prisma.teamApplication.findFirst({
+    where: { id: input.applicationId, competitionId },
+    select: { id: true },
+  });
+  if (!application) throw new Error("Application not found.");
+
+  await prisma.$transaction(async (tx) => {
+    await tx.teamApplication.update({
+      where: { id: application.id },
+      data: {
+        status: TeamApplicationStatus.REJECTED,
+        approvedAt: null,
+        approvedByUserId: null,
+      },
+    });
+    await tx.teamApplicationGeneration.updateMany({
+      where: { applicationId: application.id },
+      data: { isApproved: false },
+    });
   });
 
   return { ok: true };

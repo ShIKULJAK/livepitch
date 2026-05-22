@@ -234,6 +234,7 @@ function sanitizeCompetitionInput(input: CreateCompetitionInput) {
     pitchNames: normalizedPitchNames.length ? normalizedPitchNames : ["Teren 1"],
     scheduleDays: (input.scheduleDays ?? []).map((day) => ({
       dayLabel: day.dayLabel.trim(),
+      dayDate: day.dayDate,
       generationLabel: day.generationLabel,
       pitchId: day.pitchId ?? null,
       startTime: day.startTime,
@@ -245,10 +246,10 @@ function sanitizeCompetitionInput(input: CreateCompetitionInput) {
   };
 }
 
-type ScheduleDayRaw = { dayLabel?: string; generationLabel?: string; pitchId?: string | null; startTime?: string; endTime?: string };
+type ScheduleDayRaw = { dayLabel?: string; dayDate?: string; generationLabel?: string; pitchId?: string | null; startTime?: string; endTime?: string };
 
 function normalizeScheduleDays(value: unknown) {
-  const fallback = [{ dayLabel: "Dan 1", generationLabel: "Generacija 2018", pitchId: null, startTime: "09:00", endTime: "19:00" }];
+  const fallback = [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: "Generacija 2018", pitchId: null, startTime: "09:00", endTime: "19:00" }];
   if (!Array.isArray(value)) return fallback;
 
   const normalized = value
@@ -256,6 +257,7 @@ function normalizeScheduleDays(value: unknown) {
     .filter((day) => typeof day.dayLabel === "string" && typeof day.startTime === "string" && typeof day.endTime === "string")
     .map((day) => ({
       dayLabel: day.dayLabel!.trim(),
+      dayDate: typeof day.dayDate === "string" && day.dayDate.trim().length > 0 ? day.dayDate : new Date().toISOString().slice(0, 10),
       generationLabel:
         typeof day.generationLabel === "string" && day.generationLabel.trim().length > 0 ? day.generationLabel : "Generacija 2018",
       pitchId: typeof day.pitchId === "string" && day.pitchId.trim().length > 0 ? day.pitchId : null,
@@ -623,6 +625,7 @@ export async function listMatches(
     seasonId: match.competition.seasonId,
     seasonLabel: match.competition.season?.name ?? null,
     competitionType: match.competition.type,
+    generationYear: match.generationYear ?? null,
     round: match.round,
     scheduledAt: match.scheduledAt,
     status: match.status,
@@ -728,6 +731,48 @@ export async function saveSeasonTeamPlayerRegistrations(
 }
 
 export async function listVenues(organizationId: string) {
+  const orphanPitches = await prisma.pitch.findMany({
+    where: { organizationId, venueId: null },
+    select: { id: true, name: true },
+  });
+  if (orphanPitches.length) {
+    const venuesForMapping = await prisma.venue.findMany({
+      where: { organizationId },
+      select: { id: true, name: true },
+    });
+    for (const pitch of orphanPitches) {
+      const parts = pitch.name.split(" - ").map((part) => part.trim()).filter(Boolean);
+      if (parts.length < 2) continue;
+      const pitchNameCandidate = parts[parts.length - 1];
+      const venueNameCandidate = parts.slice(0, parts.length - 1).join(" - ");
+      const targetVenue = venuesForMapping.find((venue) => venue.name.toLowerCase() === venueNameCandidate.toLowerCase());
+      if (!targetVenue) continue;
+      await prisma.pitch.update({
+        where: { id: pitch.id },
+        data: {
+          venueId: targetVenue.id,
+          name: pitchNameCandidate,
+        },
+      });
+    }
+  }
+
+  const prefixedPitches = await prisma.pitch.findMany({
+    where: { organizationId, venueId: { not: null } },
+    select: { id: true, name: true, venue: { select: { name: true } } },
+  });
+  for (const pitch of prefixedPitches) {
+    const venueName = pitch.venue?.name?.trim();
+    if (!venueName) continue;
+    const prefix = `${venueName} - `;
+    if (pitch.name.startsWith(prefix)) {
+      await prisma.pitch.update({
+        where: { id: pitch.id },
+        data: { name: pitch.name.slice(prefix.length).trim() || pitch.name },
+      });
+    }
+  }
+
   return prisma.venue.findMany({
     where: { organizationId },
     include: {

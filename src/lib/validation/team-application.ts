@@ -25,13 +25,13 @@ export const teamApplicationInputSchema = z.object({
         fullName: z.string().trim().min(2).max(120),
       })
     )
-    .min(1)
-    .max(64),
+    .max(64)
+    .default([]),
   coaches: z
     .array(
       z.object({
         fullName: z.string().trim().min(2).max(120),
-        phone: z.string().trim().min(3).max(40),
+        phone: z.string().trim().max(40).optional().or(z.literal("")),
         email: z.string().trim().email().optional().or(z.literal("")),
       })
     )
@@ -55,15 +55,6 @@ export const teamApplicationInputSchema = z.object({
     playersByYear.set(player.generationYear, (playersByYear.get(player.generationYear) ?? 0) + 1);
   }
 
-  for (const year of value.generationYears) {
-    if (!playersByYear.get(year)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["players"],
-        message: `At least one player is required for generation ${year}.`,
-      });
-    }
-  }
 });
 
 export const approveTeamApplicationSchema = z.object({

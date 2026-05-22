@@ -42,7 +42,8 @@ export async function POST(request: Request) {
   const body = await request.json();
   const parsed = teamApplicationInputSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid payload", issues: parsed.error.issues }, { status: 400 });
+    const firstIssue = parsed.error.issues[0]?.message ?? "Invalid payload";
+    return NextResponse.json({ error: firstIssue, issues: parsed.error.issues }, { status: 400 });
   }
 
   try {

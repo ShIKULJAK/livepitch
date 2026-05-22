@@ -187,6 +187,7 @@ const matchesResponse = z.object({
       competitionId: z.string(),
       competition: z.string(),
       competitionType: z.nativeEnum(CompetitionType),
+      generationYear: z.number().nullable().optional(),
       seasonId: z.string().nullable().optional(),
       seasonLabel: z.string().nullable().optional(),
       round: z.string().nullable(),
@@ -1097,8 +1098,9 @@ export function useResetDraw(competitionId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async () => {
-      const response = await fetch(`/api/draws/${competitionId}`, { method: "DELETE" });
+    mutationFn: async (generationYear?: number) => {
+      const suffix = generationYear ? `?generationYear=${generationYear}` : "";
+      const response = await fetch(`/api/draws/${competitionId}${suffix}`, { method: "DELETE" });
       const json = await safeReadJson(response);
       if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to reset draw");
       return json;
@@ -1106,6 +1108,28 @@ export function useResetDraw(competitionId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["draw-competitions"] });
       queryClient.invalidateQueries({ queryKey: ["competition-draw", competitionId] });
+    },
+  });
+}
+
+export function useSwapDrawTeams(competitionId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: { generationYear: number; firstTeamId: string; secondTeamId: string }) => {
+      const response = await fetch(`/api/draws/${competitionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "swapTeams", ...payload }),
+      });
+      const json = await safeReadJson(response);
+      if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to swap draw teams");
+      return (json as { data: unknown }).data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["competition-draw", competitionId] });
+      queryClient.invalidateQueries({ queryKey: ["matches"] });
+      queryClient.invalidateQueries({ queryKey: ["match-details"] });
     },
   });
 }
@@ -1463,6 +1487,28 @@ export function useApproveTeamApplication(competitionId: string) {
       });
       const json = await safeReadJson(response);
       if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to approve application");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["team-applications", competitionId] });
+      queryClient.invalidateQueries({ queryKey: ["competition-generation-participants", competitionId] });
+      queryClient.invalidateQueries({ queryKey: ["competitions"] });
+      queryClient.invalidateQueries({ queryKey: ["competition-draw", competitionId] });
+    },
+  });
+}
+
+export function useRejectTeamApplication(competitionId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { applicationId: string }) => {
+      const response = await fetch(`/api/team-applications/reject?competitionId=${competitionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await safeReadJson(response);
+      if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to reject application");
       return json;
     },
     onSuccess: () => {

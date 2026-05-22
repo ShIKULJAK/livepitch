@@ -36,18 +36,36 @@ export default function TeamApplicationFormPage() {
   const [teamName, setTeamName] = useState("");
   const [generationYears, setGenerationYears] = useState<number[]>([]);
   const [playersByGeneration, setPlayersByGeneration] = useState<Record<number, PlayerRow[]>>({});
-  const [activeSuggestionKey, setActiveSuggestionKey] = useState<string | null>(null);
   const [coaches, setCoaches] = useState<CoachRow[]>([{ fullName: "", phone: "", email: "" }]);
   const [place, setPlace] = useState("");
   const [submittedDate, setSubmittedDate] = useState(toDateInput(new Date()));
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  function getTeamPlayersForGeneration(selectedTeamId: string, year: number): PlayerRow[] {
+    const fromDb = (playersQuery.data ?? []).filter((player) => {
+      if (player.teamId !== selectedTeamId) return false;
+      if (!player.dateOfBirth) return false;
+      return new Date(player.dateOfBirth).getFullYear() === year;
+    });
+
+    if (!fromDb.length) return [{ jerseyNumber: "", fullName: "", birthYear: String(year) }];
+    return fromDb.map((player) => ({
+      jerseyNumber: player.number != null ? String(player.number) : "",
+      fullName: player.fullName,
+      birthYear: String(year),
+    }));
+  }
+
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setSuccess(null);
     if (!competition) return;
+    if (generationYears.length === 0) {
+      setError("Unesite generacije djece.");
+      return;
+    }
 
     try {
       await submit.mutateAsync({
@@ -56,12 +74,14 @@ export default function TeamApplicationFormPage() {
         teamName: teamName.trim(),
         generationYears,
         players: generationYears.flatMap((year) =>
-          (playersByGeneration[year] ?? []).map((row) => ({
-            generationYear: year,
-            birthYear: Number(row.birthYear),
-            jerseyNumber: Number(row.jerseyNumber),
-            fullName: row.fullName.trim(),
-          }))
+          (playersByGeneration[year] ?? [])
+            .filter((row) => row.fullName.trim().length > 0 && row.jerseyNumber.trim().length > 0)
+            .map((row) => ({
+              generationYear: year,
+              birthYear: year,
+              jerseyNumber: Number(row.jerseyNumber),
+              fullName: row.fullName.trim(),
+            }))
         ),
         coaches: coaches.map((row) => ({ fullName: row.fullName.trim(), phone: row.phone.trim(), email: row.email.trim() })),
         place: place.trim(),
@@ -76,6 +96,10 @@ export default function TeamApplicationFormPage() {
 
   function ensureGenerationPlayers(year: number) {
     if (playersByGeneration[year]?.length) return;
+    if (teamId) {
+      setPlayersByGeneration((current) => ({ ...current, [year]: getTeamPlayersForGeneration(teamId, year) }));
+      return;
+    }
     setPlayersByGeneration((current) => ({ ...current, [year]: [{ jerseyNumber: "", fullName: "", birthYear: String(year) }] }));
   }
 
@@ -114,7 +138,14 @@ export default function TeamApplicationFormPage() {
         <form className="space-y-5" onSubmit={(event) => void onSubmit(event)}>
           <div className="grid gap-3 md:grid-cols-2">
             <FormField label="Ekipa" required>
-              <Input value={teamName} onChange={(event) => setTeamName(event.currentTarget.value)} required />
+              <Input
+                value={teamName}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setTeamName(value);
+                }}
+                required
+              />
             </FormField>
             <FormField label="Poveži postojeći tim (opcionalno)">
               <Select
@@ -123,7 +154,22 @@ export default function TeamApplicationFormPage() {
                   const value = event.currentTarget.value;
                   setTeamId(value);
                   const selected = (teamsQuery.data ?? []).find((team) => team.id === value);
-                  if (selected && !teamName) setTeamName(selected.name);
+                  if (selected) {
+                    setTeamName(selected.name);
+                    setPlace(selected.city ?? selected.place ?? "");
+                    if (selected.coach?.trim()) {
+                      setCoaches([{ fullName: selected.coach.trim(), phone: "", email: "" }]);
+                    }
+                    if (generationYears.length) {
+                      setPlayersByGeneration((current) => {
+                        const next = { ...current };
+                        for (const year of generationYears) {
+                          next[year] = getTeamPlayersForGeneration(selected.id, year);
+                        }
+                        return next;
+                      });
+                    }
+                  }
                 }}
               >
                 <option value="">Ručno unesena ekipa</option>
@@ -217,90 +263,40 @@ export default function TeamApplicationFormPage() {
                                   }))
                                   );
                                 }}
-                                required
                               />
                             </td>
                             <td className="p-2">
-                              <div className="relative">
-                                <Input
-                                  value={row.fullName}
-                                  onFocus={() => setActiveSuggestionKey(`${year}-${index}`)}
-                                  onBlur={() => setTimeout(() => setActiveSuggestionKey(null), 120)}
-                                  onChange={(event) => {
-                                    const value = event.currentTarget.value;
-                                    return (
-                                    setPlayersByGeneration((current) => ({
-                                      ...current,
-                                      [year]: rows.map((item, itemIndex) =>
-                                        itemIndex === index ? { ...item, fullName: value } : item
-                                      ),
-                                    }))
-                                    );
-                                  }}
-                                  required
-                                />
-                                {activeSuggestionKey === `${year}-${index}` && row.fullName.trim().length >= 2 ? (
-                                  <div
-                                    className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-lg border"
-                                    style={{ borderColor: "var(--border)", backgroundColor: "var(--surface)" }}
-                                  >
-                                    {(playersQuery.data ?? [])
-                                      .filter((player) => player.fullName.toLowerCase().includes(row.fullName.toLowerCase()))
-                                      .slice(0, 8)
-                                      .map((player) => {
-                                        const birthYear = player.dateOfBirth ? new Date(player.dateOfBirth).getFullYear() : year;
-                                        return (
-                                          <button
-                                            key={player.id}
-                                            type="button"
-                                            className="block w-full px-2 py-1.5 text-left text-xs hover:opacity-80"
-                                            onMouseDown={(event) => {
-                                              event.preventDefault();
-                                              setPlayersByGeneration((current) => ({
-                                                ...current,
-                                                [year]: rows.map((item, itemIndex) =>
-                                                  itemIndex === index
-                                                    ? {
-                                                        ...item,
-                                                        fullName: player.fullName,
-                                                        jerseyNumber: player.number != null ? String(player.number) : item.jerseyNumber,
-                                                        birthYear: String(birthYear),
-                                                      }
-                                                    : item
-                                                ),
-                                              }));
-                                              setActiveSuggestionKey(null);
-                                            }}
-                                          >
-                                            {player.fullName} {player.team ? `• ${player.team}` : ""} {player.number != null ? `• #${player.number}` : ""}
-                                          </button>
-                                        );
-                                      })}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </td>
-                            <td className="p-2">
-                              <Select
-                                value={row.birthYear}
+                              <Input
+                                list="players-autocomplete-list"
+                                value={row.fullName}
                                 onChange={(event) => {
                                   const value = event.currentTarget.value;
-                                  return (
+                                  const matched = (playersQuery.data ?? []).find(
+                                    (player) => player.fullName.toLowerCase() === value.trim().toLowerCase()
+                                  );
                                   setPlayersByGeneration((current) => ({
                                     ...current,
                                     [year]: rows.map((item, itemIndex) =>
-                                      itemIndex === index ? { ...item, birthYear: value } : item
+                                      itemIndex === index
+                                        ? {
+                                            ...item,
+                                            fullName: value,
+                                            jerseyNumber:
+                                              matched?.number != null ? String(matched.number) : item.jerseyNumber,
+                                            birthYear: String(year),
+                                          }
+                                        : item
                                     ),
-                                  }))
-                                  );
+                                  }));
                                 }}
-                                required
+                              />
+                            </td>
+                            <td className="p-2">
+                              <Select
+                                value={String(year)}
+                                disabled
                               >
-                                {years.map((optionYear) => (
-                                  <option key={`birth-${year}-${optionYear}`} value={String(optionYear)}>
-                                    {optionYear}
-                                  </option>
-                                ))}
+                                <option value={String(year)}>{year}</option>
                               </Select>
                             </td>
                             <td className="p-2 text-right">
@@ -325,6 +321,13 @@ export default function TeamApplicationFormPage() {
               );
             })}
           </div>
+          <datalist id="players-autocomplete-list">
+            {(playersQuery.data ?? []).map((player) => (
+              <option key={player.id} value={player.fullName}>
+                {player.team ? `${player.team}` : ""}
+              </option>
+            ))}
+          </datalist>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -339,26 +342,28 @@ export default function TeamApplicationFormPage() {
                   <Input
                     placeholder="Ime i Prezime"
                     value={coach.fullName}
-                    onChange={(event) =>
-                      setCoaches((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, fullName: event.currentTarget.value } : item)))
-                    }
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setCoaches((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, fullName: value } : item)));
+                    }}
                     required
                   />
                   <Input
                     placeholder="Tel."
                     value={coach.phone}
-                    onChange={(event) =>
-                      setCoaches((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, phone: event.currentTarget.value } : item)))
-                    }
-                    required
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setCoaches((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, phone: value } : item)));
+                    }}
                   />
                   <Input
                     placeholder="E-mail"
                     type="email"
                     value={coach.email}
-                    onChange={(event) =>
-                      setCoaches((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, email: event.currentTarget.value } : item)))
-                    }
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setCoaches((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, email: value } : item)));
+                    }}
                   />
                   <Button type="button" onClick={() => setCoaches((current) => (current.length > 1 ? current.filter((_, itemIndex) => itemIndex !== index) : current))}>
                     -
@@ -370,19 +375,37 @@ export default function TeamApplicationFormPage() {
 
           <div className="grid gap-3 md:grid-cols-2">
             <FormField label="Mjesto" required>
-              <Input value={place} onChange={(event) => setPlace(event.currentTarget.value)} required />
+              <Input
+                value={place}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setPlace(value);
+                }}
+                required
+              />
             </FormField>
             <FormField label="Datum" required>
-              <Input type="date" value={submittedDate} onChange={(event) => setSubmittedDate(event.currentTarget.value)} required />
+              <Input
+                type="date"
+                value={submittedDate}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setSubmittedDate(value);
+                }}
+                required
+              />
             </FormField>
           </div>
 
           {error ? <p className="text-sm" style={{ color: "var(--danger)" }}>{error}</p> : null}
           {success ? <p className="text-sm" style={{ color: "var(--success)" }}>{success}</p> : null}
 
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
             <Button variant="primary" type="submit" disabled={submit.isPending}>
               {submit.isPending ? "Slanje..." : "Prijavi ekipu"}
+            </Button>
+            <Button type="button" onClick={() => router.push("/prijavi-ekipu")}>
+              Odustani
             </Button>
           </div>
         </form>

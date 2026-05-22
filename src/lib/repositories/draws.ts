@@ -149,8 +149,9 @@ function buildScheduledFixtures(
   fixtures: GroupFixtureSeed[],
   pitchNames: string[],
   startAt: Date,
-  scheduleDays: Array<{ dayLabel: string; startTime: string; endTime: string }>,
-  slotDurationMinutes: number
+  scheduleDays: Array<{ dayLabel: string; dayDate?: string; startTime: string; endTime: string; pitchName?: string | null }>,
+  slotDurationMinutes: number,
+  occupiedIntervalsByPitch: Map<string, Array<{ startAt: number; endAt: number }>> = new Map()
 ) {
   const ordered = interleaveGroupFixtures(fixtures);
   const slotMs = slotDurationMinutes * 60 * 1000;
@@ -165,55 +166,71 @@ function buildScheduledFixtures(
   const dayStarts = effectiveDays.map((day, index) => {
     const [sh, sm] = day.startTime.split(":").map(Number);
     const [eh, em] = day.endTime.split(":").map(Number);
-    const base = new Date(startAt);
-    base.setHours(0, 0, 0, 0);
-    base.setDate(base.getDate() + index);
+    const base =
+      day.dayDate && /^\d{4}-\d{2}-\d{2}$/.test(day.dayDate)
+        ? new Date(`${day.dayDate}T00:00:00.000Z`)
+        : (() => {
+            const fallback = new Date(startAt);
+            fallback.setHours(0, 0, 0, 0);
+            fallback.setDate(fallback.getDate() + index);
+            return fallback;
+          })();
     const startTs = new Date(base);
     startTs.setHours(sh, sm, 0, 0);
     const endTs = new Date(base);
     endTs.setHours(eh, em, 0, 0);
-    return { startTs: startTs.getTime(), endTs: endTs.getTime() };
+    return { startTs: startTs.getTime(), endTs: endTs.getTime(), pitchName: day.pitchName ?? null };
   });
 
-  const pitchState = normalizedPitches.map((pitchName) => ({ pitchName, dayIndex: 0, nextStartAt: dayStarts[0]?.startTs ?? startAt.getTime() }));
+  const pitchState = dayStarts.flatMap((day, dayIndex) => {
+    const scopedPitches =
+      day.pitchName && day.pitchName.trim().length > 0
+        ? [day.pitchName.trim()]
+        : [];
+    return scopedPitches.map((pitchName) => ({
+      pitchName,
+      dayIndex,
+      nextStartAt: day.startTs,
+    }));
+  });
   const lastPlayedAt = new Map<string, number>();
+  const dayMatchCounts = dayStarts.map(() => 0);
   const scheduled: Array<{ fixture: GroupFixtureSeed; pitchName: string; scheduledAt: Date }> = [];
   const pending = [...ordered];
+  if (!pitchState.length) {
+    throw new Error("Za odabranu generaciju nisu definisani tereni u Dani i satnica.");
+  }
+
+  const findOverlap = (pitchName: string, startAt: number, endAt: number) => {
+    const intervals = occupiedIntervalsByPitch.get(pitchName) ?? [];
+    return intervals.find((interval) => startAt < interval.endAt && endAt > interval.startAt) ?? null;
+  };
 
   const advancePitch = (state: { pitchName: string; dayIndex: number; nextStartAt: number }) => {
-    while (state.dayIndex < dayStarts.length) {
-      const day = dayStarts[state.dayIndex];
-      if (state.nextStartAt + slotMs <= day.endTs) return;
-      state.dayIndex += 1;
-      if (state.dayIndex < dayStarts.length) state.nextStartAt = dayStarts[state.dayIndex].startTs;
+    if (state.dayIndex >= dayStarts.length) return;
+    const day = dayStarts[state.dayIndex];
+    while (state.nextStartAt + slotMs <= day.endTs) {
+      const overlap = findOverlap(state.pitchName, state.nextStartAt, state.nextStartAt + slotMs);
+      if (!overlap) return;
+      state.nextStartAt = overlap.endAt;
     }
+    state.dayIndex = dayStarts.length;
   };
 
   while (pending.length) {
     for (const state of pitchState) advancePitch(state);
     const available = pitchState.filter((state) => state.dayIndex < dayStarts.length);
     if (!available.length) {
-      const nextIndex = dayStarts.length;
-      const [sh, sm] = fallbackWindow.startTime.split(":").map(Number);
-      const [eh, em] = fallbackWindow.endTime.split(":").map(Number);
-      const base = new Date(startAt);
-      base.setHours(0, 0, 0, 0);
-      base.setDate(base.getDate() + nextIndex);
-      const startTs = new Date(base);
-      startTs.setHours(sh, sm, 0, 0);
-      const endTs = new Date(base);
-      endTs.setHours(eh, em, 0, 0);
-      dayStarts.push({ startTs: startTs.getTime(), endTs: endTs.getTime() });
-      for (const state of pitchState) {
-        if (state.dayIndex >= nextIndex) {
-          state.dayIndex = nextIndex;
-          state.nextStartAt = dayStarts[nextIndex].startTs;
-        }
-      }
-      continue;
+      throw new Error("Nema dovoljno satnice za sve grupne utakmice. Dodaj još termina za ovu generaciju (datum/teren/satnica).");
     }
-    available.sort((a, b) => a.nextStartAt - b.nextStartAt || a.pitchName.localeCompare(b.pitchName));
-    const pitch = available[0];
+    const dayIndexes = Array.from(new Set(available.map((state) => state.dayIndex)));
+    const minCount = Math.min(...dayIndexes.map((index) => dayMatchCounts[index] ?? 0));
+    const leastUsedDays = dayIndexes.filter((index) => (dayMatchCounts[index] ?? 0) === minCount);
+    const selectedDay = leastUsedDays[Math.floor(Math.random() * leastUsedDays.length)];
+    const dayPitches = available
+      .filter((state) => state.dayIndex === selectedDay)
+      .sort((a, b) => a.nextStartAt - b.nextStartAt || a.pitchName.localeCompare(b.pitchName));
+    const pitch = dayPitches[0] ?? available[0];
     const slotTime = pitch.nextStartAt;
 
     const candidates = pending
@@ -248,6 +265,10 @@ function buildScheduledFixtures(
     pending.splice(chosen.index, 1);
     lastPlayedAt.set(chosen.fixture.homeTeamId, slotTime);
     lastPlayedAt.set(chosen.fixture.awayTeamId, slotTime);
+    dayMatchCounts[pitch.dayIndex] = (dayMatchCounts[pitch.dayIndex] ?? 0) + 1;
+    const intervals = occupiedIntervalsByPitch.get(pitch.pitchName) ?? [];
+    intervals.push({ startAt: slotTime, endAt: slotTime + slotMs });
+    occupiedIntervalsByPitch.set(pitch.pitchName, intervals);
     pitch.nextStartAt = slotTime + slotMs;
   }
 
@@ -335,7 +356,11 @@ async function ensureCompetition(organizationId: string, competitionId: string) 
       },
       teamGenerations: {
         where: { isApproved: true },
-        select: { teamId: true, generationYear: true },
+        select: {
+          teamId: true,
+          generationYear: true,
+          team: { select: { id: true, name: true, profileImageUrl: true } },
+        },
       },
       draws: { select: { id: true } },
     },
@@ -351,7 +376,7 @@ export async function listDrawCompetitions(organizationId: string) {
     include: {
       season: { select: { id: true, name: true } },
       teams: { include: { team: { select: { id: true, name: true } } } },
-      teamGenerations: { where: { isApproved: true }, select: { generationYear: true } },
+      teamGenerations: { where: { isApproved: true }, select: { teamId: true, generationYear: true } },
       draws: { select: { id: true, updatedAt: true } },
     },
     orderBy: [{ createdAt: "desc" }],
@@ -377,49 +402,62 @@ export async function listDrawCompetitions(organizationId: string) {
 export async function getDrawByCompetition(organizationId: string, competitionId: string, generationYear?: number) {
   const competition = await ensureCompetition(organizationId, competitionId);
   if (!competition) return null;
+  const scopedTeamGenerations = competition.teamGenerations;
   const availableGenerationYears = Array.from(new Set(competition.teamGenerations.map((item) => item.generationYear))).sort((a, b) => b - a);
   const selectedGenerationYear =
     generationYear && availableGenerationYears.includes(generationYear)
       ? generationYear
       : availableGenerationYears[0] ?? null;
 
-  const draw = await prisma.draw.findUnique({
-    where: {
-      competitionId_generationYear: {
-        competitionId: competition.id,
-        generationYear: selectedGenerationYear,
-      },
-    },
-    include: {
-      groups: {
-        include: {
-          teams: { include: { team: { select: { id: true, name: true, profileImageUrl: true } } }, orderBy: { position: "asc" } },
-        },
-        orderBy: { order: "asc" },
-      },
-      knockoutRounds: {
-        include: {
-          matches: {
-            include: {
-              homeTeam: { select: { id: true, name: true, profileImageUrl: true } },
-              awayTeam: { select: { id: true, name: true, profileImageUrl: true } },
-              winnerTeam: { select: { id: true, name: true, profileImageUrl: true } },
+  const draw =
+    selectedGenerationYear == null
+      ? null
+      : await prisma.draw.findUnique({
+          where: {
+            competitionId_generationYear: {
+              competitionId: competition.id,
+              generationYear: selectedGenerationYear,
             },
-            orderBy: { order: "asc" },
           },
-        },
-        orderBy: { order: "asc" },
-      },
-      matches: {
-        where: { stage: "GROUP_STAGE" },
-        include: {
-          homeTeam: { select: { id: true, name: true, profileImageUrl: true } },
-          awayTeam: { select: { id: true, name: true, profileImageUrl: true } },
-        },
-        orderBy: { scheduledAt: "asc" },
-      },
-    },
-  });
+          include: {
+            groups: {
+              include: {
+                teams: { include: { team: { select: { id: true, name: true, profileImageUrl: true } } }, orderBy: { position: "asc" } },
+              },
+              orderBy: { order: "asc" },
+            },
+            knockoutRounds: {
+              include: {
+                matches: {
+                  include: {
+                    homeTeam: { select: { id: true, name: true, profileImageUrl: true } },
+                    awayTeam: { select: { id: true, name: true, profileImageUrl: true } },
+                    winnerTeam: { select: { id: true, name: true, profileImageUrl: true } },
+                  },
+                  orderBy: { order: "asc" },
+                },
+              },
+              orderBy: { order: "asc" },
+            },
+            matches: {
+              where: { stage: "GROUP_STAGE" },
+              include: {
+                homeTeam: { select: { id: true, name: true, profileImageUrl: true } },
+                awayTeam: { select: { id: true, name: true, profileImageUrl: true } },
+              },
+              orderBy: { scheduledAt: "asc" },
+            },
+          },
+        });
+
+  const participantsByGeneration = new Map<number, Array<{ id: string; name: string; profileImageUrl: string | null }>>();
+  for (const item of scopedTeamGenerations) {
+    const list = participantsByGeneration.get(item.generationYear) ?? [];
+    if (!list.some((entry) => entry.id === item.team.id)) {
+      list.push(item.team);
+    }
+    participantsByGeneration.set(item.generationYear, list);
+  }
 
   return {
     competition: {
@@ -431,12 +469,10 @@ export async function getDrawByCompetition(organizationId: string, competitionId
       seasonId: competition.seasonId,
       seasonLabel: competition.season?.name ?? null,
       matchDurationMinutes: competition.matchDurationMinutes,
-      participants: competition.teams
-        .filter((entry) => {
-          if (!selectedGenerationYear) return true;
-          return competition.teamGenerations.some((item) => item.teamId === entry.teamId && item.generationYear === selectedGenerationYear);
-        })
-        .map((entry) => entry.team),
+      participants:
+        selectedGenerationYear == null
+          ? []
+          : (participantsByGeneration.get(selectedGenerationYear) ?? []),
       availableGenerationYears,
       selectedGenerationYear,
     },
@@ -449,7 +485,12 @@ export async function getDrawByCompetition(organizationId: string, competitionId
   };
 }
 
-export async function resetDraw(organizationId: string, actor: { id: string; role: string }, competitionId: string) {
+export async function resetDraw(
+  organizationId: string,
+  actor: { id: string; role: string },
+  competitionId: string,
+  generationYear?: number
+) {
   const competition = await ensureCompetition(organizationId, competitionId);
   if (!competition) return null;
   if (!canEditEntity(actor, competition)) throw new Error("Forbidden");
@@ -457,14 +498,30 @@ export async function resetDraw(organizationId: string, actor: { id: string; rol
     return { ok: true };
   }
 
-  await prisma.match.deleteMany({
-    where: {
-      competitionId,
-      stage: "GROUP_STAGE",
-      drawId: { not: null },
-    },
-  });
-  await prisma.draw.deleteMany({ where: { competitionId } });
+  const drawIds =
+    generationYear == null
+      ? (
+          await prisma.draw.findMany({
+            where: { competitionId },
+            select: { id: true },
+          })
+        ).map((item) => item.id)
+      : (
+          await prisma.draw.findMany({
+            where: { competitionId, generationYear },
+            select: { id: true },
+          })
+        ).map((item) => item.id);
+
+  if (drawIds.length) {
+    await prisma.match.deleteMany({
+      where: {
+        competitionId,
+        drawId: { in: drawIds },
+      },
+    });
+  }
+  await prisma.draw.deleteMany({ where: { competitionId, ...(generationYear == null ? {} : { generationYear }) } });
   return { ok: true };
 }
 
@@ -481,19 +538,16 @@ export async function generateDraw(
     throw new Error("Draw generation is available only for tournament competitions.");
   }
 
-  const availableGenerationYears = Array.from(new Set(competition.teamGenerations.map((item) => item.generationYear))).sort((a, b) => b - a);
+  const scopedTeamGenerations = competition.teamGenerations;
+  const availableGenerationYears = Array.from(new Set(scopedTeamGenerations.map((item) => item.generationYear))).sort((a, b) => b - a);
   const generationYear = config.generationYear ?? availableGenerationYears[0];
   if (!generationYear) {
     throw new Error("Nema odobrenih generacija za izvlačenje.");
   }
-  const allowedTeamIds = new Set(
-    competition.teamGenerations
-      .filter((item) => item.generationYear === generationYear)
-      .map((item) => item.teamId)
-  );
-  const participants = competition.teams
-    .filter((entry) => allowedTeamIds.has(entry.teamId))
-    .map((entry) => ({ id: entry.team.id, name: entry.team.name }));
+  const participants = scopedTeamGenerations
+    .filter((item) => item.generationYear === generationYear)
+    .map((item) => ({ id: item.team.id, name: item.team.name }))
+    .filter((item, index, array) => array.findIndex((entry) => entry.id === item.id) === index);
   if (!participants.length) {
     throw new Error("Nema učesnika za odabranu generaciju.");
   }
@@ -525,8 +579,6 @@ export async function generateDraw(
   if (existingGeneratedGroupMatches > 0) {
     throw new Error("Group-stage matches already exist. Reset draw before regenerating.");
   }
-
-  await prisma.draw.deleteMany({ where: { competitionId } });
 
   return prisma.$transaction(async (tx) => {
     const draw = await tx.draw.create({
@@ -579,17 +631,63 @@ export async function generateDraw(
           ? competition.pitchNames
           : ["Teren 1"];
       const scheduleDays =
-        ((competition.scheduleDays as unknown as Array<{ dayLabel: string; pitchId?: string | null; startTime: string; endTime: string }> | null) ?? [
-          { dayLabel: "Dan 1", pitchId: null, startTime: "09:00", endTime: "19:00" },
+        ((competition.scheduleDays as unknown as Array<{ dayLabel: string; dayDate?: string; generationLabel?: string; pitchId?: string | null; startTime: string; endTime: string }> | null) ?? [
+          { dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), pitchId: null, startTime: "09:00", endTime: "19:00" },
         ]).filter((day) => day.dayLabel && day.startTime && day.endTime);
-      const dayPitchIds = Array.from(new Set(scheduleDays.map((day) => day.pitchId).filter((value): value is string => Boolean(value))));
+      const generationLabel = `Generacija ${generationYear}`;
+      const generationScheduleDays = scheduleDays.filter((day) => day.generationLabel === generationLabel);
+      if (!generationScheduleDays.length) {
+        throw new Error(`Nema definisanih termina za ${generationLabel}.`);
+      }
+      const effectiveScheduleDays = generationScheduleDays;
+      const dayPitchIds = Array.from(new Set(effectiveScheduleDays.map((day) => day.pitchId).filter((value): value is string => Boolean(value))));
+      if (!dayPitchIds.length) {
+        throw new Error(`Za ${generationLabel} moraš odabrati teren(e) u Dani i satnica.`);
+      }
       const selectedPitches = dayPitchIds.length
         ? await tx.pitch.findMany({ where: { id: { in: dayPitchIds }, organizationId, isActive: true }, select: { id: true, name: true } })
         : [];
       const selectedPitchNames = selectedPitches.map((item) => item.name);
-      const effectivePitchNames = selectedPitchNames.length ? selectedPitchNames : pitchNames;
+      if (!selectedPitchNames.length) {
+        throw new Error(`Nije pronađen nijedan aktivan teren za ${generationLabel}.`);
+      }
+      const effectivePitchNames = selectedPitchNames;
+      const pitchById = new Map(selectedPitches.map((pitch) => [pitch.id, pitch.name]));
+      const scheduleWithPitch = effectiveScheduleDays.map((day) => ({
+        ...day,
+        pitchName: day.pitchId ? pitchById.get(day.pitchId) ?? null : null,
+      }));
       const slotDurationMinutes = competition.matchDurationMinutes + 5;
-      const scheduledFixtures = buildScheduledFixtures(fixtures, effectivePitchNames, placeholderBaseDate, scheduleDays, slotDurationMinutes);
+      const existingMatches = await tx.match.findMany({
+        where: {
+          competitionId: competition.id,
+          pitchName: { in: effectivePitchNames },
+          status: { not: "CANCELED" },
+        },
+        select: {
+          pitchName: true,
+          scheduledAt: true,
+          regularTimeMinutes: true,
+        },
+      });
+      const occupiedIntervalsByPitch = new Map<string, Array<{ startAt: number; endAt: number }>>();
+      for (const match of existingMatches) {
+        if (!match.pitchName) continue;
+        const startAt = match.scheduledAt.getTime();
+        const endAt = startAt + (match.regularTimeMinutes + 5) * 60 * 1000;
+        const intervals = occupiedIntervalsByPitch.get(match.pitchName) ?? [];
+        intervals.push({ startAt, endAt });
+        occupiedIntervalsByPitch.set(match.pitchName, intervals);
+      }
+
+      const scheduledFixtures = buildScheduledFixtures(
+        fixtures,
+        effectivePitchNames,
+        placeholderBaseDate,
+        scheduleWithPitch,
+        slotDurationMinutes,
+        occupiedIntervalsByPitch
+      );
 
       for (const scheduledFixture of scheduledFixtures) {
         const fixture = scheduledFixture.fixture;
@@ -748,6 +846,105 @@ export async function generateDraw(
     }
 
     return draw;
+  });
+}
+
+export async function swapDrawGroupTeams(
+  organizationId: string,
+  actor: { id: string; role: string },
+  competitionId: string,
+  generationYear: number,
+  firstTeamId: string,
+  secondTeamId: string
+) {
+  const competition = await ensureCompetition(organizationId, competitionId);
+  if (!competition) return null;
+  if (!canEditEntity(actor, competition)) throw new Error("Forbidden");
+  if (firstTeamId === secondTeamId) throw new Error("Odaberi dvije različite ekipe.");
+
+  const draw = await prisma.draw.findUnique({
+    where: {
+      competitionId_generationYear: {
+        competitionId,
+        generationYear,
+      },
+    },
+    select: { id: true },
+  });
+  if (!draw) throw new Error("Izvlačenje za odabranu generaciju ne postoji.");
+
+  const groupEntries = await prisma.drawGroupTeam.findMany({
+    where: {
+      group: { drawId: draw.id },
+      teamId: { in: [firstTeamId, secondTeamId] },
+    },
+    select: {
+      id: true,
+      teamId: true,
+      groupId: true,
+      position: true,
+    },
+  });
+
+  const firstEntry = groupEntries.find((item) => item.teamId === firstTeamId);
+  const secondEntry = groupEntries.find((item) => item.teamId === secondTeamId);
+  if (!firstEntry || !secondEntry) {
+    throw new Error("Obje ekipe moraju biti u grupama za odabranu generaciju.");
+  }
+  if (firstEntry.groupId === secondEntry.groupId) {
+    throw new Error("Switch radi samo između različitih grupa.");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    await tx.drawGroupTeam.update({
+      where: { id: firstEntry.id },
+      data: { teamId: secondTeamId, position: secondEntry.position ?? firstEntry.position ?? null },
+    });
+    await tx.drawGroupTeam.update({
+      where: { id: secondEntry.id },
+      data: { teamId: firstTeamId, position: firstEntry.position ?? secondEntry.position ?? null },
+    });
+
+    const affectedMatches = await tx.match.findMany({
+      where: {
+        competitionId,
+        drawId: draw.id,
+        stage: "GROUP_STAGE",
+        generationYear,
+        OR: [
+          { homeTeamId: firstTeamId },
+          { awayTeamId: firstTeamId },
+          { homeTeamId: secondTeamId },
+          { awayTeamId: secondTeamId },
+        ],
+      },
+      select: { id: true, homeTeamId: true, awayTeamId: true },
+    });
+
+    for (const match of affectedMatches) {
+      const nextHome =
+        match.homeTeamId === firstTeamId
+          ? secondTeamId
+          : match.homeTeamId === secondTeamId
+            ? firstTeamId
+            : match.homeTeamId;
+      const nextAway =
+        match.awayTeamId === firstTeamId
+          ? secondTeamId
+          : match.awayTeamId === secondTeamId
+            ? firstTeamId
+            : match.awayTeamId;
+      if (nextHome === nextAway) continue;
+      await tx.match.update({
+        where: { id: match.id },
+        data: {
+          homeTeamId: nextHome,
+          awayTeamId: nextAway,
+        },
+      });
+    }
+
+    return { ok: true };
   });
 }
 

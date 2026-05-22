@@ -346,11 +346,32 @@ export async function saveMatchDetails(
 ) {
   const match = await prisma.match.findFirst({
     where: { id: matchId, competition: { organizationId } },
-    select: { id: true, homeTeamId: true, awayTeamId: true, status: true, regularTimeMinutes: true, createdById: true },
+    select: {
+      id: true,
+      homeTeamId: true,
+      awayTeamId: true,
+      status: true,
+      regularTimeMinutes: true,
+      createdById: true,
+      scheduledAt: true,
+      competition: {
+        select: {
+          status: true,
+        },
+      },
+    },
   });
 
   if (!match) return null;
   if (!canEditEntity(actor, match)) throw new Error("Forbidden");
+  if (actor.role !== "ADMIN") {
+    if (match.competition.status === "UPCOMING" || match.competition.status === "DRAFT") {
+      throw new Error("Unos nije dozvoljen dok takmičenje ne počne.");
+    }
+    if (new Date() < match.scheduledAt) {
+      throw new Error("Unos nije dozvoljen prije početka utakmice.");
+    }
+  }
 
   const homeTeamStats = payload.teamStats.find((item) => item.teamId === match.homeTeamId);
   const awayTeamStats = payload.teamStats.find((item) => item.teamId === match.awayTeamId);

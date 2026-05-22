@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { useCompetitionDraw, useGenerateDraw, useResetDraw } from "@/hooks/use-competitions";
+import { useCompetitionDraw, useGenerateDraw, useResetDraw, useSwapDrawTeams } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { canCreateDraws } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
@@ -34,9 +34,12 @@ export default function CompetitionDrawPage() {
   const { user } = useCurrentUser();
   const canManageByRole = canCreateDraws(user?.role);
   const [selectedGenerationYear, setSelectedGenerationYear] = useState<number | null>(null);
+  const [isGenerationSwitching, setIsGenerationSwitching] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const drawQuery = useCompetitionDraw(params.competitionId, selectedGenerationYear);
   const generateDraw = useGenerateDraw(params.competitionId);
   const resetDraw = useResetDraw(params.competitionId);
+  const swapDrawTeams = useSwapDrawTeams(params.competitionId);
 
   const [draftConfig, setDraftConfig] = useState<{
     groupStageEnabled?: boolean;
@@ -45,6 +48,23 @@ export default function CompetitionDrawPage() {
     quarterfinalsEnabled?: boolean;
     thirdPlaceMatchEnabled?: boolean;
   }>({});
+  const [swapFirstTeamId, setSwapFirstTeamId] = useState("");
+  const [swapSecondTeamId, setSwapSecondTeamId] = useState("");
+  const generationYears = drawQuery.data?.competition.availableGenerationYears ?? [];
+  const activeGeneration = drawQuery.data?.competition.selectedGenerationYear ?? generationYears[0] ?? null;
+
+  useEffect(() => {
+    if (selectedGenerationYear == null && activeGeneration != null) {
+      setSelectedGenerationYear(activeGeneration);
+    }
+  }, [selectedGenerationYear, activeGeneration]);
+
+  useEffect(() => {
+    if (selectedGenerationYear == null) return;
+    setIsGenerationSwitching(true);
+    const timeout = window.setTimeout(() => setIsGenerationSwitching(false), 220);
+    return () => window.clearTimeout(timeout);
+  }, [selectedGenerationYear]);
 
   if (drawQuery.isLoading) {
     return <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>Loading draw...</Card>;
@@ -56,14 +76,6 @@ export default function CompetitionDrawPage() {
   const { competition, draw } = drawQuery.data;
   const canManage = canManageByRole && Boolean(drawQuery.data.canManage);
   const isTournament = competition.type === "TOURNAMENT";
-  const generationYears = competition.availableGenerationYears ?? [];
-  const activeGeneration = competition.selectedGenerationYear ?? generationYears[0] ?? null;
-
-  useEffect(() => {
-    if (selectedGenerationYear == null && activeGeneration != null) {
-      setSelectedGenerationYear(activeGeneration);
-    }
-  }, [selectedGenerationYear, activeGeneration]);
 
   const currentConfig = {
     groupStageEnabled: draftConfig.groupStageEnabled ?? draw?.groupStageEnabled ?? true,
@@ -74,7 +86,63 @@ export default function CompetitionDrawPage() {
   };
 
   async function onGenerate() {
-    await generateDraw.mutateAsync({ ...currentConfig, generationYear: selectedGenerationYear ?? undefined });
+    setGenerateError(null);
+    try {
+      await generateDraw.mutateAsync({ ...currentConfig });
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : "Greška pri kreiranju izvlačenja.");
+    }
+  }
+
+  async function onGenerateSelectedGeneration() {
+    setGenerateError(null);
+    if (!selectedGenerationYear) {
+      setGenerateError("Nije odabrana generacija.");
+      return;
+    }
+    try {
+      await generateDraw.mutateAsync({ ...currentConfig, generationYear: selectedGenerationYear });
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : "Greška pri kreiranju izvlačenja.");
+    }
+  }
+
+  async function onResetSelectedGeneration() {
+    setGenerateError(null);
+    if (!selectedGenerationYear) {
+      setGenerateError("Nije odabrana generacija.");
+      return;
+    }
+    try {
+      await resetDraw.mutateAsync(selectedGenerationYear);
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : "Greška pri resetu izvlačenja.");
+    }
+  }
+
+  async function onSwapTeams() {
+    setGenerateError(null);
+    if (!selectedGenerationYear) {
+      setGenerateError("Nije odabrana generacija.");
+      return;
+    }
+    if (!swapFirstTeamId || !swapSecondTeamId) {
+      setGenerateError("Odaberi obje ekipe za switch.");
+      return;
+    }
+    if (swapFirstTeamId === swapSecondTeamId) {
+      setGenerateError("Odaberi dvije različite ekipe.");
+      return;
+    }
+    try {
+      await swapDrawTeams.mutateAsync({
+        generationYear: selectedGenerationYear,
+        firstTeamId: swapFirstTeamId,
+        secondTeamId: swapSecondTeamId,
+      });
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : "Greška pri zamjeni ekipa.");
+    }
   }
 
   const rounds = draw?.knockoutRounds ? [...draw.knockoutRounds].sort((a, b) => a.order - b.order) : [];
@@ -86,6 +154,12 @@ export default function CompetitionDrawPage() {
 
   const groupsLeft = draw?.groups ? draw.groups.filter((_, index) => index % 2 === 0) : [];
   const groupsRight = draw?.groups ? draw.groups.filter((_, index) => index % 2 === 1) : [];
+  const groupTeamOptions = (draw?.groups ?? []).flatMap((group) =>
+    group.teams.map((entry) => ({
+      teamId: entry.team.id,
+      label: `Grupa ${group.name} - ${entry.team.name}`,
+    }))
+  );
 
   const r16Left = roundOf16?.matches?.slice(0, Math.ceil((roundOf16.matches.length ?? 0) / 2)) ?? [];
   const r16Right = roundOf16?.matches?.slice(Math.ceil((roundOf16.matches.length ?? 0) / 2)) ?? [];
@@ -235,16 +309,64 @@ export default function CompetitionDrawPage() {
         <h3 className="text-lg font-semibold">Participants</h3>
         <div className="max-w-xs">
           <FormField label="Generacija">
-            <Select
-              value={selectedGenerationYear ? String(selectedGenerationYear) : ""}
-              onChange={(event) => setSelectedGenerationYear(Number(event.currentTarget.value))}
-            >
-              {generationYears.map((year) => (
-                <option key={year} value={year}>
-                  Generacija {year}
-                </option>
-              ))}
-            </Select>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!generationYears.length || selectedGenerationYear == null || generationYears.indexOf(selectedGenerationYear) <= 0}
+                  onClick={() => {
+                    if (selectedGenerationYear == null) return;
+                    const idx = generationYears.indexOf(selectedGenerationYear);
+                    if (idx > 0) setSelectedGenerationYear(generationYears[idx - 1]);
+                  }}
+                >
+                  {"<"}
+                </Button>
+                <Select
+                  value={selectedGenerationYear ? String(selectedGenerationYear) : ""}
+                  onChange={(event) => setSelectedGenerationYear(Number(event.currentTarget.value))}
+                >
+                  {generationYears.map((year) => (
+                    <option key={year} value={year}>
+                      Generacija {year}
+                    </option>
+                  ))}
+                </Select>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!generationYears.length || selectedGenerationYear == null || generationYears.indexOf(selectedGenerationYear) >= generationYears.length - 1}
+                  onClick={() => {
+                    if (selectedGenerationYear == null) return;
+                    const idx = generationYears.indexOf(selectedGenerationYear);
+                    if (idx >= 0 && idx < generationYears.length - 1) setSelectedGenerationYear(generationYears[idx + 1]);
+                  }}
+                >
+                  {">"}
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {generationYears.map((year) => {
+                  const active = selectedGenerationYear === year;
+                  return (
+                    <button
+                      key={year}
+                      type="button"
+                      onClick={() => setSelectedGenerationYear(year)}
+                      className="rounded-full border px-2.5 py-1 text-xs"
+                      style={{
+                        borderColor: active ? "#9BEA3C" : "var(--border)",
+                        color: active ? "#9BEA3C" : "var(--text-secondary)",
+                        backgroundColor: active ? "color-mix(in srgb, #9BEA3C 15%, var(--surface-2))" : "transparent",
+                      }}
+                    >
+                      {year}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </FormField>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -259,7 +381,13 @@ export default function CompetitionDrawPage() {
       {!isTournament ? <Card className="p-5 text-sm" style={{ color: "var(--text-secondary)" }}>League competitions do not use draw, groups, or knockout phases. Ranking is determined by league standings and points.</Card> : null}
 
       {isTournament ? (
-        <>
+        <div
+          style={{
+            opacity: isGenerationSwitching ? 0.35 : 1,
+            transform: isGenerationSwitching ? "translateX(8px)" : "translateX(0)",
+            transition: "opacity 220ms ease, transform 220ms ease",
+          }}
+        >
           <Card className="space-y-4 p-5">
             <h3 className="text-lg font-semibold">Draw Configuration</h3>
             <div className="grid gap-3 md:grid-cols-2">
@@ -285,15 +413,66 @@ export default function CompetitionDrawPage() {
             <div className="flex flex-wrap justify-end gap-2">
               {canManage ? (
                 <>
-                  <Button variant="danger" onClick={() => resetDraw.mutate()} disabled={resetDraw.isPending}>{resetDraw.isPending ? "Resetting..." : "Reset Draw"}</Button>
-                  <Button variant="primary" onClick={() => void onGenerate()} disabled={generateDraw.isPending || competition.participants.length < 2}>{generateDraw.isPending ? "Generating..." : "Kreiraj zrijeb"}</Button>
+                  <Button
+                    variant="danger"
+                    onClick={() => void onResetSelectedGeneration()}
+                    disabled={resetDraw.isPending || !selectedGenerationYear}
+                  >
+                    {resetDraw.isPending ? "Resetting..." : `Reset draw (${selectedGenerationYear ?? "-"})`}
+                  </Button>
+                  <Button variant="danger" onClick={() => resetDraw.mutate(undefined)} disabled={resetDraw.isPending}>{resetDraw.isPending ? "Resetting..." : "Reset Draw (sve)"}</Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => void onGenerateSelectedGeneration()}
+                    disabled={generateDraw.isPending || !selectedGenerationYear}
+                  >
+                    {generateDraw.isPending
+                      ? "Generating..."
+                      : `Kreiraj zrijeb (${selectedGenerationYear ?? "-"})`}
+                  </Button>
+                  <Button variant="primary" onClick={() => void onGenerate()} disabled={generateDraw.isPending || generationYears.length === 0}>{generateDraw.isPending ? "Generating..." : "Kreiraj zrijeb (sve generacije)"}</Button>
                 </>
               ) : <p className="text-sm" style={{ color: "var(--text-secondary)" }}>Read-only access.</p>}
             </div>
+            {generateError ? (
+              <div className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--danger)", color: "var(--danger)" }}>
+                {generateError}
+              </div>
+            ) : null}
           </Card>
 
           <Card className="space-y-3 p-5">
             <h3 className="text-lg font-semibold">Groups</h3>
+            {canManage && draw?.groups.length ? (
+              <div className="grid gap-2 rounded-xl border p-3 md:grid-cols-[1fr_1fr_auto]" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
+                <Select value={swapFirstTeamId} onChange={(event) => setSwapFirstTeamId(event.currentTarget.value)}>
+                  <option value="">Odaberi prvu ekipu</option>
+                  {groupTeamOptions.map((item) => (
+                    <option key={`first-${item.teamId}`} value={item.teamId}>
+                      {item.label}
+                    </option>
+                  ))}
+                </Select>
+                <Select value={swapSecondTeamId} onChange={(event) => setSwapSecondTeamId(event.currentTarget.value)}>
+                  <option value="">Odaberi drugu ekipu</option>
+                  {groupTeamOptions
+                    .filter((item) => item.teamId !== swapFirstTeamId)
+                    .map((item) => (
+                      <option key={`second-${item.teamId}`} value={item.teamId}>
+                        {item.label}
+                      </option>
+                    ))}
+                </Select>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void onSwapTeams()}
+                  disabled={swapDrawTeams.isPending || !swapFirstTeamId || !swapSecondTeamId}
+                >
+                  {swapDrawTeams.isPending ? "Switch..." : "Switch ekipa"}
+                </Button>
+              </div>
+            ) : null}
             {draw?.groups.length ? (
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="grid min-w-[280px] flex-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -368,7 +547,7 @@ export default function CompetitionDrawPage() {
               </>
             ) : <p className="text-sm" style={{ color: "var(--text-secondary)" }}>No knockout structure generated yet.</p>}
           </Card>
-        </>
+        </div>
       ) : null}
     </div>
   );

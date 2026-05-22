@@ -7,6 +7,7 @@ import {
   useApproveTeamApplication,
   useCompetition,
   useCompetitionGenerationParticipants,
+  useRejectTeamApplication,
   useSeasonSquads,
   useTeamApplications,
   useTeams,
@@ -115,6 +116,7 @@ export default function EditCompetitionPage() {
   const updateCompetition = useUpdateCompetition(params.id);
   const applicationsQuery = useTeamApplications(params.id);
   const approveApplication = useApproveTeamApplication(params.id);
+  const rejectApplication = useRejectTeamApplication(params.id);
   const generationParticipantsQuery = useCompetitionGenerationParticipants(params.id);
   const [teamSearch, setTeamSearch] = useState("");
   const [applicationsSeasonCompetitionId, setApplicationsSeasonCompetitionId] = useState<string>(params.id);
@@ -144,7 +146,7 @@ export default function EditCompetitionPage() {
     participantTeamIds?: string[];
     stadiumName?: string;
     pitchNames?: string[];
-    scheduleDays?: Array<{ dayLabel: string; generationLabel: string; pitchId?: string | null; startTime: string; endTime: string }>;
+    scheduleDays?: Array<{ dayLabel: string; dayDate: string; generationLabel: string; pitchId?: string | null; startTime: string; endTime: string }>;
   }>({});
   const generationOptions = GENERATION_LABELS;
 
@@ -155,10 +157,15 @@ export default function EditCompetitionPage() {
   const selectedSport = draft.sport ?? competition?.sport ?? SportType.FOOTBALL;
   const pitchNames = draft.pitchNames ?? competition?.pitchNames ?? ["Teren 1"];
   const stadiumBlocks = decodeStadiumBlocks(draft.stadiumName ?? competition?.stadiumName, pitchNames);
-  const scheduleDays =
+  const scheduleDays = (
     draft.scheduleDays ??
-    (competition?.scheduleDays as Array<{ dayLabel: string; generationLabel: string; pitchId?: string | null; startTime: string; endTime: string }> | null) ??
-    [{ dayLabel: "Dan 1", generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }];
+    (competition?.scheduleDays as Array<{ dayLabel: string; dayDate?: string; generationLabel: string; pitchId?: string | null; startTime: string; endTime: string }> | null) ??
+    [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }]
+  ).map((day) => ({
+    ...day,
+    dayDate: day.dayDate ?? new Date().toISOString().slice(0, 10),
+    dayLabel: day.dayLabel || day.dayDate || "Dan 1",
+  }));
   const pitchOptions = useMemo(
     () =>
       (venuesQuery.data ?? []).flatMap((venue) =>
@@ -209,7 +216,11 @@ export default function EditCompetitionPage() {
       matchDurationMinutes: Number(draft.matchDurationMinutes ?? String(competition.matchDurationMinutes)),
       stadiumName: draft.stadiumName ?? competition.stadiumName ?? "",
       pitchNames: pitchNames.length ? pitchNames : ["Teren 1"],
-      scheduleDays,
+      scheduleDays: scheduleDays.map((day) => ({
+        ...day,
+        dayDate: day.dayDate ?? new Date().toISOString().slice(0, 10),
+        dayLabel: day.dayLabel || day.dayDate || "Dan 1",
+      })),
       teamCount: Number(draft.teamCount ?? (competition.teamCount ? String(competition.teamCount) : "0")) || null,
       maxTeams: Number(draft.maxTeams ?? (competition.maxTeams ? String(competition.maxTeams) : "0")) || null,
       teamSize: Number(draft.teamSize ?? (competition.teamSize ? String(competition.teamSize) : "0")) || null,
@@ -358,7 +369,7 @@ export default function EditCompetitionPage() {
               required
             />
           </FormField>
-          <div className="space-y-2">
+          <div className="space-y-2" style={{ display: "none" }}>
             <FormField label="Stadioni i tereni" tooltip="Dodaj jedan ili više stadiona i njihove terene.">
               <div className="space-y-2">
                 {stadiumBlocks.map((stadium, stadiumIndex) => (
@@ -441,12 +452,13 @@ export default function EditCompetitionPage() {
             <FormField label="Dani i satnica" tooltip="Dodaj dane turnira i vremenski opseg (od-do) za planiranje utakmica.">
               <div className="space-y-2">
                 {scheduleDays.map((day, index) => (
-                  <div key={`${index}-${day.dayLabel}`} className="grid gap-2 md:grid-cols-[1fr_220px_1fr_130px_130px_auto]">
+                  <div key={`${index}-${day.dayDate ?? day.dayLabel}`} className="grid gap-2 md:grid-cols-[1fr_220px_1fr_130px_130px_auto]">
                     <Input
-                      value={day.dayLabel}
+                      type="date"
+                      value={day.dayDate ?? ""}
                       onChange={(event) => {
                         const next = [...scheduleDays];
-                        next[index] = { ...next[index], dayLabel: event.target.value };
+                        next[index] = { ...next[index], dayDate: event.target.value, dayLabel: event.target.value };
                         setDraft((current) => ({ ...current, scheduleDays: next }));
                       }}
                     />
@@ -512,7 +524,7 @@ export default function EditCompetitionPage() {
                         type="button"
                         onClick={() => {
                           const next = scheduleDays.filter((_, itemIndex) => itemIndex !== index);
-                          setDraft((current) => ({ ...current, scheduleDays: next.length ? next : [{ dayLabel: "Dan 1", generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }] }));
+                          setDraft((current) => ({ ...current, scheduleDays: next.length ? next : [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }] }));
                         }}
                       >
                         -
@@ -525,7 +537,7 @@ export default function EditCompetitionPage() {
                   onClick={() =>
                     setDraft((current) => ({
                       ...current,
-                      scheduleDays: [...scheduleDays, { dayLabel: `Dan ${scheduleDays.length + 1}`, generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }],
+                      scheduleDays: [...scheduleDays, { dayLabel: `Dan ${scheduleDays.length + 1}`, dayDate: new Date().toISOString().slice(0, 10), generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }],
                     }))
                   }
                 >
@@ -814,14 +826,24 @@ export default function EditCompetitionPage() {
                   ))}
                 </div>
                 <div className="mt-2 flex justify-end">
-                  <Button
-                    type="button"
-                    variant="primary"
-                    disabled={approveApplication.isPending}
-                    onClick={() => void approveApplicationByGenerations(application.id, application.generations.map((item) => item.generationYear))}
-                  >
-                    Odobri učešće
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      disabled={approveApplication.isPending}
+                      onClick={() => void approveApplicationByGenerations(application.id, application.generations.map((item) => item.generationYear))}
+                    >
+                      Odobri učešće
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="danger"
+                      disabled={rejectApplication.isPending}
+                      onClick={() => void rejectApplication.mutateAsync({ applicationId: application.id })}
+                    >
+                      Odbij ekipu
+                    </Button>
+                  </div>
                 </div>
               </div>
             );

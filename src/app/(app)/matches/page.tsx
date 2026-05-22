@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { MatchStatus } from "@prisma/client";
@@ -40,6 +40,7 @@ function MatchesPageContent() {
   const searchParams = useSearchParams();
   const competitionId = searchParams.get("competitionId") ?? undefined;
   const [statusFilter, setStatusFilter] = useState<MatchStatus | "ALL">("ALL");
+  const [isMounted, setIsMounted] = useState(false);
   const matchesQuery = useMatches({ status: statusFilter, competitionId });
   const deleteMatch = useDeleteMatch();
   const { user } = useCurrentUser();
@@ -49,6 +50,34 @@ function MatchesPageContent() {
     () => (matchesQuery.data ?? []).filter((match) => statusFilter === "ALL" || match.status === statusFilter),
     [matchesQuery.data, statusFilter]
   );
+  const groupedByGeneration = useMemo(() => {
+    const map = new Map<string, typeof rows>();
+    for (const match of rows) {
+      const key = match.generationYear ? `Generacija ${match.generationYear}` : "Bez generacije";
+      const list = map.get(key) ?? [];
+      list.push(match);
+      map.set(key, list);
+    }
+    return Array.from(map.entries()).sort((a, b) => {
+      if (a[0] === "Bez generacije") return 1;
+      if (b[0] === "Bez generacije") return -1;
+      return b[0].localeCompare(a[0]);
+    });
+  }, [rows]);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  if (!isMounted) {
+    return (
+      <div className="space-y-4">
+        <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>
+          Loading...
+        </Card>
+      </div>
+    );
+  }
 
   async function exportMatches() {
     const params = new URLSearchParams();
@@ -100,82 +129,89 @@ function MatchesPageContent() {
         </Select>
       </FilterBar>
 
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto lp-scrollbar">
-          <table className="min-w-full text-sm">
-            <thead style={{ backgroundColor: "var(--surface-2)" }}>
-              <tr>
-                {[t("table.time"), t("table.match"), t("table.tournament"), t("table.venue"), t("table.status"), t("table.action")].map((h) => (
-                  <th key={h} className="px-4 py-3 text-left text-xs uppercase" style={{ color: "var(--text-secondary)" }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((match) => (
-                (() => {
-                  const canEditRow = canEditEntity(user, match);
-                  return (
-                <tr key={match.id} className="border-t" style={{ borderColor: "var(--border)" }}>
-                  <td className="px-4 py-3">{formatTimeStable(match.scheduledAt)}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-start gap-2">
-                      <FavoriteButton targetType={FavoriteTargetType.MATCH} targetId={match.id} className="mt-0.5" />
-                      <div className="min-w-[220px] space-y-1">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className={isHomeWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}>{match.homeTeam}</span>
-                          <span className={isHomeWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}>
-                            {match.homeScore ?? (match.status === "SCHEDULED" ? "-" : "")}
-                          </span>
+      <div className="space-y-4">
+        {groupedByGeneration.map(([generationLabel, generationMatches]) => (
+          <Card key={generationLabel} className="overflow-hidden">
+            <div className="border-b px-4 py-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
+              <p className="text-sm font-semibold" style={{ color: "#9BEA3C" }}>{generationLabel}</p>
+            </div>
+            <div className="overflow-x-auto lp-scrollbar">
+              <table className="min-w-full text-sm">
+                <thead style={{ backgroundColor: "var(--surface-2)" }}>
+                  <tr>
+                    {[t("table.time"), t("table.match"), t("table.tournament"), t("table.venue"), t("table.status"), t("table.action")].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left text-xs uppercase" style={{ color: "var(--text-secondary)" }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {generationMatches.map((match) => (
+                    (() => {
+                      const canEditRow = canEditEntity(user, match);
+                      return (
+                    <tr key={match.id} className="border-t" style={{ borderColor: "var(--border)" }}>
+                      <td className="px-4 py-3">{formatTimeStable(match.scheduledAt)}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-start gap-2">
+                          <FavoriteButton targetType={FavoriteTargetType.MATCH} targetId={match.id} className="mt-0.5" />
+                          <div className="min-w-[220px] space-y-1">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className={isHomeWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}>{match.homeTeam}</span>
+                              <span className={isHomeWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}>
+                                {match.homeScore ?? (match.status === "SCHEDULED" ? "-" : "")}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3">
+                              <span className={isAwayWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}>{match.awayTeam}</span>
+                              <span className={isAwayWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}>
+                                {match.awayScore ?? (match.status === "SCHEDULED" ? "-" : "")}
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between gap-3">
-                          <span className={isAwayWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}>{match.awayTeam}</span>
-                          <span className={isAwayWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}>
-                            {match.awayScore ?? (match.status === "SCHEDULED" ? "-" : "")}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">{match.competition}</td>
-                  <td className="px-4 py-3">{match.venue}</td>
-                  <td className="px-4 py-3">
-                    <Badge variant={getBadgeVariant(match.status)}>{match.status}</Badge>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <Link href={`/matches/${match.id}`} style={{ color: "var(--primary)" }}>
-                        {t("common.open")}
-                      </Link>
-                      {canEditRow ? (
-                        <>
-                          <Link href={`/matches/${match.id}/edit`} style={{ color: "var(--info)" }}>
-                            Edit
+                      </td>
+                      <td className="px-4 py-3">{match.competition}</td>
+                      <td className="px-4 py-3">{match.venue}</td>
+                      <td className="px-4 py-3">
+                        <Badge variant={getBadgeVariant(match.status)}>{match.status}</Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <Link href={`/matches/${match.id}`} style={{ color: "var(--primary)" }}>
+                            {t("common.open")}
                           </Link>
-                          <button
-                            type="button"
-                            style={{ color: "var(--danger)" }}
-                            onClick={() => {
-                              if (!window.confirm(`Delete match ${match.homeTeam} vs ${match.awayTeam}?`)) return;
-                              deleteMatch.mutate(match.id);
-                            }}
-                            disabled={deleteMatch.isPending}
-                          >
-                            Delete
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-                  );
-                })()
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+                          {canEditRow ? (
+                            <>
+                              <Link href={`/matches/${match.id}/edit`} style={{ color: "var(--info)" }}>
+                                Edit
+                              </Link>
+                              <button
+                                type="button"
+                                style={{ color: "var(--danger)" }}
+                                onClick={() => {
+                                  if (!window.confirm(`Delete match ${match.homeTeam} vs ${match.awayTeam}?`)) return;
+                                  deleteMatch.mutate(match.id);
+                                }}
+                                disabled={deleteMatch.isPending}
+                              >
+                                Delete
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                      );
+                    })()
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        ))}
+      </div>
 
       {matchesQuery.isLoading ? (
         <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>

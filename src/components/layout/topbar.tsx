@@ -2,7 +2,8 @@
 
 import { Bell, Check, Goal, MessageSquare, Search, UserRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Select } from "@/components/ui/select";
@@ -11,6 +12,7 @@ import { useCurrentUser } from "@/hooks/use-current-user";
 import { Button } from "@/components/ui/button";
 import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "@/hooks/use-competitions";
 import { formatDateTimeStable } from "@/lib/utils/date";
+import { appNavigation } from "@/lib/constants/navigation";
 
 type SearchResult = {
   id: string;
@@ -23,6 +25,7 @@ type SearchResult = {
 export function Topbar() {
   const { locale, setLocale, t } = useI18n();
   const { user } = useCurrentUser();
+  const pathname = usePathname();
   const router = useRouter();
   const notificationsQuery = useNotifications();
   const markNotificationRead = useMarkNotificationRead();
@@ -111,6 +114,109 @@ export function Topbar() {
   }
 
   const unreadCount = notificationsQuery.data?.unreadCount ?? 0;
+  const localeLabels =
+    locale === "bs"
+      ? {
+          home: "Početna",
+          details: "Detalji",
+          create: "Kreiraj",
+          edit: "Uredi",
+          tournaments: "Takmičenja",
+          matches: "Utakmice",
+          teams: "Timovi",
+          players: "Igrači",
+          favorites: "Favoriti",
+          teamApplications: "Prijavi ekipu",
+          draws: "Izvlačenje",
+          schedule: "Raspored",
+          standings: "Tabela",
+          statistics: "Statistika",
+          venues: "Lokacije i tereni",
+          messages: "Poruke",
+          notifications: "Obavještenja",
+          settings: "Podešavanja",
+          appearance: "Izgled",
+          billing: "Naplata",
+          integrations: "Integracije",
+          roles: "Uloge i dozvole",
+          security: "Sigurnost",
+          privacy: "Privatnost",
+        }
+      : {
+          home: "Home",
+          details: "Details",
+          create: "Create",
+          edit: "Edit",
+          tournaments: "Competitions",
+          matches: "Matches",
+          teams: "Teams",
+          players: "Players",
+          favorites: "Favorites",
+          teamApplications: "Apply Team",
+          draws: "Draws",
+          schedule: "Schedule",
+          standings: "Standings",
+          statistics: "Statistics",
+          venues: "Venues & Pitches",
+          messages: "Messages",
+          notifications: "Notifications",
+          settings: "Settings",
+          appearance: "Appearance",
+          billing: "Billing",
+          integrations: "Integrations",
+          roles: "Roles & Permissions",
+          security: "Security",
+          privacy: "Privacy",
+        };
+
+  const segmentLabelMap: Record<string, string> = {
+    dashboard: t("nav.dashboard"),
+    tournaments: localeLabels.tournaments,
+    matches: localeLabels.matches,
+    teams: localeLabels.teams,
+    players: localeLabels.players,
+    favorites: localeLabels.favorites,
+    "prijavi-ekipu": localeLabels.teamApplications,
+    draws: localeLabels.draws,
+    schedule: localeLabels.schedule,
+    standings: localeLabels.standings,
+    statistics: localeLabels.statistics,
+    venues: localeLabels.venues,
+    messages: localeLabels.messages,
+    notifications: localeLabels.notifications,
+    settings: localeLabels.settings,
+    appearance: localeLabels.appearance,
+    billing: localeLabels.billing,
+    integrations: localeLabels.integrations,
+    roles: localeLabels.roles,
+    security: localeLabels.security,
+    privacy: localeLabels.privacy,
+  };
+
+  const segments = pathname.split("/").filter(Boolean);
+  const breadcrumbs = segments.map((segment, index) => {
+    const href = `/${segments.slice(0, index + 1).join("/")}`;
+    const navItem = appNavigation.find((item) => item.href === href);
+
+    let label: string;
+    if (navItem) {
+      label = t(navItem.labelKey);
+    } else if (segmentLabelMap[segment]) {
+      label = segmentLabelMap[segment];
+    } else if (segment === "create") {
+      label = localeLabels.create;
+    } else if (segment === "edit") {
+      label = localeLabels.edit;
+    } else if (/^[a-z0-9]{12,}$/i.test(segment)) {
+      label = localeLabels.details;
+    } else {
+      label = decodeURIComponent(segment)
+        .replace(/-/g, " ")
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+    }
+
+    return { href, label };
+  });
 
   return (
     <header className="sticky top-0 z-30 border-b px-4 py-3 backdrop-blur lg:px-6" style={{ borderColor: "var(--border)", backgroundColor: "color-mix(in srgb,var(--bg) 85%, transparent)" }}>
@@ -306,6 +412,26 @@ export function Topbar() {
           {t("common.logout")}
         </Button>
       </div>
+      <nav className="mt-3 flex items-center gap-2 overflow-x-auto text-xs lp-scrollbar" aria-label="Breadcrumb">
+        <Link href="/dashboard" className="shrink-0 hover:underline" style={{ color: "var(--text-secondary)" }}>
+          {localeLabels.home}
+        </Link>
+        {breadcrumbs.map((crumb, index) => {
+          const isLast = index === breadcrumbs.length - 1;
+          return (
+            <div key={crumb.href} className="flex items-center gap-2">
+              <span style={{ color: "var(--text-secondary)" }}>/</span>
+              {isLast ? (
+                <span className="shrink-0 font-medium text-white">{crumb.label}</span>
+              ) : (
+                <Link href={crumb.href} className="shrink-0 hover:underline" style={{ color: "var(--text-secondary)" }}>
+                  {crumb.label}
+                </Link>
+              )}
+            </div>
+          );
+        })}
+      </nav>
     </header>
   );
 }

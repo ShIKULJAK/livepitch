@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
+import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Select } from "@/components/ui/select";
 
 type DrawTeam = { name: string; profileImageUrl?: string | null };
@@ -36,6 +37,7 @@ export default function CompetitionDrawPage() {
   const [selectedGenerationYear, setSelectedGenerationYear] = useState<number | null>(null);
   const [isGenerationSwitching, setIsGenerationSwitching] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [swapSuccess, setSwapSuccess] = useState<string | null>(null);
   const drawQuery = useCompetitionDraw(params.competitionId, selectedGenerationYear);
   const generateDraw = useGenerateDraw(params.competitionId);
   const resetDraw = useResetDraw(params.competitionId);
@@ -67,7 +69,12 @@ export default function CompetitionDrawPage() {
   }, [selectedGenerationYear]);
 
   if (drawQuery.isLoading) {
-    return <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>Loading draw...</Card>;
+    return (
+      <div className="space-y-4">
+        <LoadingSkeleton />
+        <LoadingSkeleton />
+      </div>
+    );
   }
   if (!drawQuery.data) {
     return <Card className="p-4 text-sm" style={{ color: "var(--danger)" }}>Competition not found.</Card>;
@@ -87,6 +94,7 @@ export default function CompetitionDrawPage() {
 
   async function onGenerate() {
     setGenerateError(null);
+    setSwapSuccess(null);
     try {
       await generateDraw.mutateAsync({ ...currentConfig });
     } catch (error) {
@@ -96,6 +104,7 @@ export default function CompetitionDrawPage() {
 
   async function onGenerateSelectedGeneration() {
     setGenerateError(null);
+    setSwapSuccess(null);
     if (!selectedGenerationYear) {
       setGenerateError("Nije odabrana generacija.");
       return;
@@ -109,6 +118,7 @@ export default function CompetitionDrawPage() {
 
   async function onResetSelectedGeneration() {
     setGenerateError(null);
+    setSwapSuccess(null);
     if (!selectedGenerationYear) {
       setGenerateError("Nije odabrana generacija.");
       return;
@@ -122,6 +132,7 @@ export default function CompetitionDrawPage() {
 
   async function onSwapTeams() {
     setGenerateError(null);
+    setSwapSuccess(null);
     if (!selectedGenerationYear) {
       setGenerateError("Nije odabrana generacija.");
       return;
@@ -140,6 +151,7 @@ export default function CompetitionDrawPage() {
         firstTeamId: swapFirstTeamId,
         secondTeamId: swapSecondTeamId,
       });
+      setSwapSuccess("Zamjena ekipa je sačuvana i raspored je ažuriran.");
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Greška pri zamjeni ekipa.");
     }
@@ -437,6 +449,11 @@ export default function CompetitionDrawPage() {
             {generateError ? (
               <div className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--danger)", color: "var(--danger)" }}>
                 {generateError}
+              </div>
+            ) : null}
+            {swapSuccess ? (
+              <div className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--primary)", color: "var(--primary)" }}>
+                {swapSuccess}
               </div>
             ) : null}
           </Card>

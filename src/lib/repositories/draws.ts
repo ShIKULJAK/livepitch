@@ -24,6 +24,30 @@ type GroupFixtureSeed = {
   seedOrder: number;
 };
 
+type GenerationMatchDuration = {
+  generationLabel: string;
+  matchDurationMinutes: number;
+};
+
+function resolveGenerationMatchDuration(
+  generationMatchDurations: unknown,
+  generationYear: number | null | undefined,
+  fallback: number
+) {
+  if (!generationYear || !Array.isArray(generationMatchDurations)) return fallback;
+  const generationLabel = `Generacija ${generationYear}`;
+  const entry = (generationMatchDurations as GenerationMatchDuration[]).find(
+    (item) =>
+      item &&
+      typeof item.generationLabel === "string" &&
+      item.generationLabel.trim() === generationLabel &&
+      typeof item.matchDurationMinutes === "number" &&
+      Number.isFinite(item.matchDurationMinutes)
+  );
+  if (!entry) return fallback;
+  return Math.max(1, Math.min(240, Math.round(entry.matchDurationMinutes)));
+}
+
 function shuffle<T>(items: T[]) {
   const copy = [...items];
   for (let i = copy.length - 1; i > 0; i -= 1) {
@@ -657,7 +681,12 @@ export async function generateDraw(
         ...day,
         pitchName: day.pitchId ? pitchById.get(day.pitchId) ?? null : null,
       }));
-      const slotDurationMinutes = competition.matchDurationMinutes + 5;
+      const generationMatchDurationMinutes = resolveGenerationMatchDuration(
+        competition.generationMatchDurations,
+        generationYear,
+        competition.matchDurationMinutes
+      );
+      const slotDurationMinutes = generationMatchDurationMinutes + 5;
       const existingMatches = await tx.match.findMany({
         where: {
           competitionId: competition.id,
@@ -706,7 +735,7 @@ export async function generateDraw(
             awayTeamId: fixture.awayTeamId,
             status: "SCHEDULED",
             scheduledAt: scheduledFixture.scheduledAt,
-            regularTimeMinutes: competition.matchDurationMinutes,
+            regularTimeMinutes: generationMatchDurationMinutes,
             pitchName: scheduledFixture.pitchName,
             venueLabel,
             createdById: actor.id,

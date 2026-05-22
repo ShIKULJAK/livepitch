@@ -33,6 +33,14 @@ const competitionListResponse = z.object({
       matchesCount: z.number(),
       liveMatches: z.number(),
       matchDurationMinutes: z.number(),
+      generationMatchDurations: z
+        .array(
+          z.object({
+            generationLabel: z.string(),
+            matchDurationMinutes: z.number(),
+          })
+        )
+        .optional(),
       stadiumName: z.string().nullable().optional(),
       pitchNames: z.array(z.string()).optional(),
       scheduleDays: z
@@ -74,6 +82,14 @@ const competitionDetailsResponse = z.object({
     teamSize: z.number().nullable(),
     substitutions: z.number().nullable(),
     matchDurationMinutes: z.number(),
+    generationMatchDurations: z
+      .array(
+        z.object({
+          generationLabel: z.string(),
+          matchDurationMinutes: z.number(),
+        })
+      )
+      .optional(),
     stadiumName: z.string().nullable().optional(),
     pitchNames: z.array(z.string()).optional(),
     scheduleDays: z

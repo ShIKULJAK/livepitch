@@ -12,7 +12,7 @@ export function Sidebar() {
   const { t } = useI18n();
 
   return (
-    <aside className="hidden h-screen w-[250px] shrink-0 border-r p-4 lg:flex lg:flex-col" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }} aria-label="Primary sidebar">
+    <aside className="fixed left-0 top-0 z-40 hidden h-screen w-[250px] shrink-0 border-r p-4 lg:flex lg:flex-col" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }} aria-label="Primary sidebar">
       <BrandLogo />
       <nav className="mt-6 space-y-1" aria-label="Main navigation">
         {appNavigation.map((item) => {

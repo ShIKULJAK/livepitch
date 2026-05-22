@@ -10,6 +10,7 @@ import { canCreatePlayers, canEditEntity } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { formatDateDDMMYYYY } from "@/lib/utils/date";
 
 function InfoRow({ label, value }: { label: string; value: ReactNode }) {
@@ -68,7 +69,7 @@ export default function PlayerDetailsPage() {
     { label: "Age", value: player?.age },
   ].filter((item) => item.value !== null && item.value !== undefined && item.value !== "");
 
-  if (playersQuery.isLoading) return <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>Loading player...</Card>;
+  if (playersQuery.isLoading) return <LoadingSkeleton />;
   if (!player) return <Card className="p-4 text-sm" style={{ color: "var(--danger)" }}>Player not found.</Card>;
 
   return (

@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
+import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -133,6 +134,7 @@ export default function EditCompetitionPage() {
     endDate?: string;
     registrationDeadline?: string;
     matchDurationMinutes?: string;
+    generationMatchDurations?: Array<{ generationLabel: string; matchDurationMinutes: number }>;
     teamCount?: string;
     maxTeams?: string;
     teamSize?: string;
@@ -156,6 +158,7 @@ export default function EditCompetitionPage() {
   const participantTeamIds = draft.participantTeamIds ?? competition?.teams.map((entry) => entry.teamId) ?? [];
   const selectedSport = draft.sport ?? competition?.sport ?? SportType.FOOTBALL;
   const pitchNames = draft.pitchNames ?? competition?.pitchNames ?? ["Teren 1"];
+  const generationMatchDurations = draft.generationMatchDurations ?? competition?.generationMatchDurations ?? [];
   const stadiumBlocks = decodeStadiumBlocks(draft.stadiumName ?? competition?.stadiumName, pitchNames);
   const scheduleDays = (
     draft.scheduleDays ??
@@ -214,6 +217,7 @@ export default function EditCompetitionPage() {
       endDate: toIsoDate(draft.endDate ?? toDateInput(competition.endDate)),
       registrationDeadline: toIsoDate(draft.registrationDeadline ?? toDateInput(competition.registrationDeadline)),
       matchDurationMinutes: Number(draft.matchDurationMinutes ?? String(competition.matchDurationMinutes)),
+      generationMatchDurations,
       stadiumName: draft.stadiumName ?? competition.stadiumName ?? "",
       pitchNames: pitchNames.length ? pitchNames : ["Teren 1"],
       scheduleDays: scheduleDays.map((day) => ({
@@ -279,7 +283,7 @@ export default function EditCompetitionPage() {
   }
 
   if (competitionQuery.isLoading) {
-    return <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>Loading competition...</Card>;
+    return <LoadingSkeleton />;
   }
 
   if (!competition) {
@@ -369,6 +373,69 @@ export default function EditCompetitionPage() {
               required
             />
           </FormField>
+          <div className="space-y-2 md:col-span-2">
+            <FormField label="Trajanje po generacijama (opciono)" tooltip="Ako nije definisano, koristi se globalni Match Duration.">
+              <div className="space-y-2">
+                {generationMatchDurations.map((item, index) => (
+                  <div key={`${item.generationLabel}-${index}`} className="grid gap-2 md:grid-cols-[220px_160px_auto]">
+                    <Select
+                      value={item.generationLabel}
+                      onChange={(event) => {
+                        const next = [...generationMatchDurations];
+                        next[index] = { ...next[index], generationLabel: event.currentTarget.value };
+                        setDraft((current) => ({ ...current, generationMatchDurations: next }));
+                      }}
+                    >
+                      {generationOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </Select>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={240}
+                      value={item.matchDurationMinutes}
+                      onChange={(event) => {
+                        const next = [...generationMatchDurations];
+                        next[index] = { ...next[index], matchDurationMinutes: Number(event.currentTarget.value || 0) };
+                        setDraft((current) => ({ ...current, generationMatchDurations: next }));
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        const next = generationMatchDurations.filter((_, rowIndex) => rowIndex !== index);
+                        setDraft((current) => ({ ...current, generationMatchDurations: next }));
+                      }}
+                    >
+                      -
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const used = new Set(generationMatchDurations.map((item) => item.generationLabel));
+                    const nextGeneration = generationOptions.find((option) => !used.has(option)) ?? generationOptions[0];
+                    setDraft((current) => ({
+                      ...current,
+                      generationMatchDurations: [
+                        ...generationMatchDurations,
+                        {
+                          generationLabel: nextGeneration,
+                          matchDurationMinutes: Number(draft.matchDurationMinutes ?? String(competition.matchDurationMinutes)),
+                        },
+                      ],
+                    }));
+                  }}
+                >
+                  Dodaj generaciju
+                </Button>
+              </div>
+            </FormField>
+          </div>
           <div className="space-y-2" style={{ display: "none" }}>
             <FormField label="Stadioni i tereni" tooltip="Dodaj jedan ili više stadiona i njihove terene.">
               <div className="space-y-2">

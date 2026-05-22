@@ -3,7 +3,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { useEffect, useState } from "react";
-import { SessionProvider } from "next-auth/react";
 import { useI18nStore } from "@/lib/i18n/store";
 import { useThemeStore } from "@/lib/theme/store";
 
@@ -31,11 +30,9 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   const showDevtools = process.env.NODE_ENV === "development";
 
   return (
-    <SessionProvider>
-      <QueryClientProvider client={queryClient}>
-        {children}
-        {showDevtools ? <ReactQueryDevtools initialIsOpen={false} /> : null}
-      </QueryClientProvider>
-    </SessionProvider>
+    <QueryClientProvider client={queryClient}>
+      {children}
+      {showDevtools ? <ReactQueryDevtools initialIsOpen={false} /> : null}
+    </QueryClientProvider>
   );
 }

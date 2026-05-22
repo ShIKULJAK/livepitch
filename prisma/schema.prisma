@@ -279,6 +279,7 @@ model Competition {
   teamSize              Int?
   substitutions         Int?
   matchDurationMinutes  Int                @default(90)
+  generationMatchDurations Json?
   stadiumName           String?
   pitchNames            String[]           @default(["Teren 1"])
   scheduleDays          Json?

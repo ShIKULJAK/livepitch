@@ -1,12 +1,49 @@
-﻿"use client";
+"use client";
 
-import { useSession } from "next-auth/react";
+import { useEffect, useState } from "react";
+
+type CurrentUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  organizationId: string;
+  locale: string;
+} | null;
 
 export function useCurrentUser() {
-  const { data, status } = useSession();
+  const [user, setUser] = useState<CurrentUser>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadUser() {
+      try {
+        const response = await fetch("/api/auth/current", { cache: "no-store" });
+        if (!response.ok) {
+          if (!cancelled) setUser(null);
+          return;
+        }
+        const json = (await response.json()) as { data?: CurrentUser };
+        if (!cancelled) setUser(json.data ?? null);
+      } catch {
+        if (!cancelled) setUser(null);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+
+    void loadUser();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return {
-    user: data?.user ?? null,
-    isLoading: status === "loading",
-    isAuthenticated: status === "authenticated",
+    user,
+    isLoading,
+    isAuthenticated: Boolean(user),
   };
 }
+

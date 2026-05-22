@@ -291,7 +291,15 @@ export async function listMatchesForExport(
   return prisma.match.findMany({
     where,
     include: {
-      competition: true,
+      competition: {
+        include: {
+          season: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
       venue: true,
       homeTeam: true,
       awayTeam: true,
@@ -399,6 +407,7 @@ export async function saveMatchDetails(
       data: {
         homeScore: payload.homeScore,
         awayScore: payload.awayScore,
+        regularTimeMinutes: payload.regularTimeMinutes,
         status: match.status === "SCHEDULED" ? "FINISHED" : match.status,
       },
     });

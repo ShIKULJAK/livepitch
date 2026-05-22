@@ -44,6 +44,7 @@ const defaults: CompetitionFormValues = {
   teamSize: 11,
   substitutions: 5,
   matchDurationMinutes: 90,
+  generationMatchDurations: [],
   stadiumName: "Stadion",
   pitchNames: ["Teren 1"],
   scheduleDays: [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: `Generacija ${new Date().getFullYear() - 8}`, startTime: "09:00", endTime: "19:00" }],
@@ -162,6 +163,7 @@ export default function CreateTournamentPage() {
   const watchedSeasonLabel = useWatch({ control: form.control, name: "seasonLabel" });
   const participantTeamIds = useWatch({ control: form.control, name: "participantTeamIds" }) ?? [];
   const pitchNames = useWatch({ control: form.control, name: "pitchNames" }) ?? ["Teren 1"];
+  const generationMatchDurations = useWatch({ control: form.control, name: "generationMatchDurations" }) ?? [];
   const scheduleDays =
     useWatch({ control: form.control, name: "scheduleDays" }) ??
     [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }];
@@ -218,6 +220,12 @@ export default function CreateTournamentPage() {
     ["Status", t(`competition.status.${watchedStatus}`)],
     ["Format", watchedFormat || "TBD"],
     ["Match Duration", `${form.getValues("matchDurationMinutes")} min`],
+    [
+      "Generation Duration Overrides",
+      generationMatchDurations.length
+        ? generationMatchDurations.map((item) => `${item.generationLabel}: ${item.matchDurationMinutes} min`).join(" | ")
+        : "Global duration only",
+    ],
     ["Participants", participantTeamIds.length ? `${participantTeamIds.length} selected` : "None"],
     ["Stadium", form.getValues("stadiumName") || "N/A"],
     ["Pitches", pitchNames.join(", ")],
@@ -710,6 +718,64 @@ export default function CreateTournamentPage() {
                   {...form.register("matchDurationMinutes", { setValueAs: (value) => Number(value) })}
                 />
               </FormField>
+              <div className="space-y-2 md:col-span-2">
+                <FormField label="Trajanje po generacijama (opciono)" tooltip="Ako nije definisano, koristi se globalni Match Duration.">
+                  <div className="space-y-2">
+                    {generationMatchDurations.map((item, index) => (
+                      <div key={`${item.generationLabel}-${index}`} className="grid gap-2 md:grid-cols-[220px_160px_auto]">
+                        <Select
+                          value={item.generationLabel}
+                          onChange={(event) => {
+                            const next = [...generationMatchDurations];
+                            next[index] = { ...next[index], generationLabel: event.currentTarget.value };
+                            form.setValue("generationMatchDurations", next, { shouldDirty: true, shouldValidate: true });
+                          }}
+                        >
+                          {generationOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </Select>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={240}
+                          value={item.matchDurationMinutes}
+                          onChange={(event) => {
+                            const next = [...generationMatchDurations];
+                            next[index] = { ...next[index], matchDurationMinutes: Number(event.currentTarget.value || 0) };
+                            form.setValue("generationMatchDurations", next, { shouldDirty: true, shouldValidate: true });
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          onClick={() => {
+                            const next = generationMatchDurations.filter((_, rowIndex) => rowIndex !== index);
+                            form.setValue("generationMatchDurations", next, { shouldDirty: true, shouldValidate: true });
+                          }}
+                        >
+                          -
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        const used = new Set(generationMatchDurations.map((item) => item.generationLabel));
+                        const nextGeneration = generationOptions.find((option) => !used.has(option)) ?? generationOptions[0];
+                        form.setValue(
+                          "generationMatchDurations",
+                          [...generationMatchDurations, { generationLabel: nextGeneration, matchDurationMinutes: form.getValues("matchDurationMinutes") ?? 90 }],
+                          { shouldDirty: true, shouldValidate: true }
+                        );
+                      }}
+                    >
+                      Dodaj generaciju
+                    </Button>
+                  </div>
+                </FormField>
+              </div>
               <FormField label="Status" tooltip="Current lifecycle state of this competition.">
                 <Select {...form.register("status")}>
                   <option value={CompetitionStatus.DRAFT}>{t("competition.status.DRAFT")}</option>

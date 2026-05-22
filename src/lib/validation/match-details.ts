@@ -58,6 +58,7 @@ export const matchDetailsUpdateSchema = z
   .object({
     homeScore: z.number().int().min(0),
     awayScore: z.number().int().min(0),
+    regularTimeMinutes: z.number().int().min(1).max(240),
     goalEvents: z.array(goalEventSchema).default([]),
     teamStats: z.array(teamStatsSchema).length(2),
   });

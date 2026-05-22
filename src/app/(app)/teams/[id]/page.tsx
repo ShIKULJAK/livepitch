@@ -9,6 +9,7 @@ import { canCreateTeams, canEditEntity } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 
 function InfoRow({ label, value }: { label: string; value: string | number }) {
   return (
@@ -50,7 +51,7 @@ export default function TeamDetailsPage() {
     { label: "Points", value: team?.points },
   ].filter((item) => item.value !== null && item.value !== undefined && item.value !== "");
 
-  if (teamsQuery.isLoading) return <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>Loading team...</Card>;
+  if (teamsQuery.isLoading) return <LoadingSkeleton />;
   if (!team) return <Card className="p-4 text-sm" style={{ color: "var(--danger)" }}>Team not found.</Card>;
 
   return (

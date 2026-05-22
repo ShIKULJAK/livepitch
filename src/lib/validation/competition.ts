@@ -31,6 +31,11 @@ const scheduleDaySchema = z
     }
   });
 
+const generationDurationSchema = z.object({
+  generationLabel: z.string().regex(/^Generacija \d{4}$/),
+  matchDurationMinutes: z.number().int().min(1).max(240),
+});
+
 const competitionBaseSchema = z.object({
   name: z.string().min(2).max(120),
   type: z.nativeEnum(CompetitionType),
@@ -46,6 +51,7 @@ const competitionBaseSchema = z.object({
   teamSize: z.number().int().min(5).max(15).optional().nullable(),
   substitutions: z.number().int().min(0).max(12).optional().nullable(),
   matchDurationMinutes: z.number().int().min(1).max(240),
+  generationMatchDurations: z.array(generationDurationSchema).max(20).default([]),
   stadiumName: z.string().trim().min(2).max(120),
   pitchNames: z.array(z.string().trim().min(1).max(80)).min(1).max(16),
   scheduleDays: z.array(scheduleDaySchema).min(1).max(30),

@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 
 export default function DrawsPage() {
   const drawCompetitionsQuery = useDrawCompetitions();
@@ -15,9 +16,10 @@ export default function DrawsPage() {
       <PageHeader title="Izvlacenje" description="Manage group draws and knockout bracket generation for competitions." />
 
       {drawCompetitionsQuery.isLoading ? (
-        <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>
-          Loading competitions...
-        </Card>
+        <>
+          <LoadingSkeleton />
+          <LoadingSkeleton />
+        </>
       ) : null}
 
       {drawCompetitionsQuery.isError ? (
@@ -26,8 +28,9 @@ export default function DrawsPage() {
         </Card>
       ) : null}
 
-      <div className="space-y-3">
-        {drawCompetitionsQuery.data?.map((competition) => (
+      {!drawCompetitionsQuery.isLoading ? (
+        <div className="space-y-3">
+          {drawCompetitionsQuery.data?.map((competition) => (
           <Card key={competition.id} className="grid gap-3 p-4 md:grid-cols-[1fr_auto] md:items-center">
             <div>
               <div className="flex items-center gap-2">
@@ -48,8 +51,9 @@ export default function DrawsPage() {
               </Button>
             </Link>
           </Card>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

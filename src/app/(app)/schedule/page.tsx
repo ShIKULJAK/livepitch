@@ -6,6 +6,7 @@ import { useMatches } from "@/hooks/use-competitions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { formatDateDDMMYYYY, formatTimeHHMM } from "@/lib/utils/date";
 
 function getStatusVariant(status: MatchStatus) {
@@ -29,8 +30,14 @@ export default function SchedulePage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Schedule" description="View and manage all match schedules." />
+      {matchesQuery.isLoading ? (
+        <>
+          <LoadingSkeleton />
+          <LoadingSkeleton />
+        </>
+      ) : null}
       <div className="space-y-4">
-        {groups.map((competitionGroup) => (
+        {!matchesQuery.isLoading ? groups.map((competitionGroup) => (
           <Card key={competitionGroup.competition} className="space-y-4 p-4">
             <h2 className="text-xl font-semibold">{competitionGroup.competition}</h2>
             {Object.entries(competitionGroup.byDate).map(([date, rows]) => (
@@ -56,13 +63,8 @@ export default function SchedulePage() {
               </div>
             ))}
           </Card>
-        ))}
+        )) : null}
       </div>
-      {matchesQuery.isLoading ? (
-        <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>
-          Loading schedule...
-        </Card>
-      ) : null}
       {matchesQuery.isError ? (
         <Card className="p-4 text-sm" style={{ color: "var(--danger)" }}>
           {(matchesQuery.error as Error).message}

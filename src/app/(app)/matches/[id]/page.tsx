@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
+import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Select } from "@/components/ui/select";
 import { Tooltip } from "@/components/ui/tooltip";
 import { formatDateTimeDDMMYYYY } from "@/lib/utils/date";
@@ -145,11 +146,7 @@ export default function MatchDetailsPage() {
   }, [matchDetailsQuery.data]);
 
   if (matchDetailsQuery.isLoading) {
-    return (
-      <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>
-        Loading match...
-      </Card>
-    );
+    return <LoadingSkeleton />;
   }
   if (!matchDetailsQuery.data || !form) {
     return (
@@ -186,6 +183,7 @@ export default function MatchDetailsPage() {
     await updateMatchDetails.mutateAsync({
       homeScore: form.homeScore,
       awayScore: form.awayScore,
+      regularTimeMinutes: Number(form.regularTimeMinutes),
       goalEvents: form.goalEvents.map((goal) => ({
         teamId: goal.teamId,
         playerId: goal.playerId || null,
@@ -259,11 +257,21 @@ export default function MatchDetailsPage() {
 
         <FormField
           label="Regular Time Minutes"
-          tooltip="This value is inherited from competition settings and used for stoppage-time formatting."
-          helperText={`Derived from competition configuration (${matchDetailsQuery.data.competitionMatchDurationMinutes} min).`}
-          readOnly
+          tooltip="Duration used for this specific match. Can be adjusted manually if needed."
+          helperText={`Competition default: ${matchDetailsQuery.data.competitionMatchDurationMinutes} min.`}
+          readOnly={!canEdit}
         >
-          <Input value={String(form.regularTimeMinutes)} readOnly />
+          <Input
+            type="number"
+            min={1}
+            max={240}
+            value={String(form.regularTimeMinutes)}
+            readOnly={!canEdit}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              mutateForm((current) => ({ ...current, regularTimeMinutes: Number(value || 0) }));
+            }}
+          />
         </FormField>
       </Card>
 

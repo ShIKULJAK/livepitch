@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
+import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Select } from "@/components/ui/select";
 
 export default function EditTeamPage() {
@@ -69,7 +70,7 @@ export default function EditTeamPage() {
   }
 
   if (teamsQuery.isLoading) {
-    return <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>Loading team...</Card>;
+    return <LoadingSkeleton />;
   }
 
   if (!team) {

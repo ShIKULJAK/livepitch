@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
+import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Select } from "@/components/ui/select";
 
 const statusOptions: Array<{ value: PlayerStatus; label: string }> = [
@@ -119,7 +120,7 @@ export default function EditPlayerPage() {
   }
 
   if (playersQuery.isLoading) {
-    return <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>Loading player...</Card>;
+    return <LoadingSkeleton />;
   }
 
   if (!player) {

@@ -71,6 +71,7 @@ export async function listCompetitions(
     startDate: competition.startDate,
     endDate: competition.endDate,
     matchDurationMinutes: competition.matchDurationMinutes,
+    generationMatchDurations: normalizeGenerationMatchDurations(competition.generationMatchDurations),
     stadiumName: competition.stadiumName,
     pitchNames: competition.pitchNames,
     scheduleDays: normalizeScheduleDays(competition.scheduleDays),
@@ -211,6 +212,19 @@ function sanitizeCompetitionInput(input: CreateCompetitionInput) {
   const normalizedPitchNames = Array.from(
     new Set((input.pitchNames ?? ["Teren 1"]).map((name) => name.trim()).filter(Boolean))
   );
+  const normalizedGenerationMatchDurations = Array.from(
+    new Map(
+      (input.generationMatchDurations ?? [])
+        .filter((item) => item.generationLabel?.trim())
+        .map((item) => [
+          item.generationLabel.trim(),
+          {
+            generationLabel: item.generationLabel.trim(),
+            matchDurationMinutes: item.matchDurationMinutes,
+          },
+        ])
+    ).values()
+  );
 
   return {
     ...input,
@@ -230,6 +244,7 @@ function sanitizeCompetitionInput(input: CreateCompetitionInput) {
     teamSize: input.type === "FRIENDLY_MATCH" ? 11 : input.teamSize ?? null,
     substitutions: input.type === "FRIENDLY_MATCH" ? 5 : input.substitutions ?? null,
     matchDurationMinutes: input.matchDurationMinutes ?? 90,
+    generationMatchDurations: normalizedGenerationMatchDurations,
     stadiumName: input.stadiumName.trim(),
     pitchNames: normalizedPitchNames.length ? normalizedPitchNames : ["Teren 1"],
     scheduleDays: (input.scheduleDays ?? []).map((day) => ({
@@ -247,6 +262,7 @@ function sanitizeCompetitionInput(input: CreateCompetitionInput) {
 }
 
 type ScheduleDayRaw = { dayLabel?: string; dayDate?: string; generationLabel?: string; pitchId?: string | null; startTime?: string; endTime?: string };
+type GenerationMatchDurationRaw = { generationLabel?: string; matchDurationMinutes?: number };
 
 function normalizeScheduleDays(value: unknown) {
   const fallback = [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: "Generacija 2018", pitchId: null, startTime: "09:00", endTime: "19:00" }];
@@ -266,6 +282,23 @@ function normalizeScheduleDays(value: unknown) {
     }));
 
   return normalized.length ? normalized : fallback;
+}
+
+function normalizeGenerationMatchDurations(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => item as GenerationMatchDurationRaw)
+    .filter(
+      (item) =>
+        typeof item.generationLabel === "string" &&
+        /^Generacija \d{4}$/.test(item.generationLabel.trim()) &&
+        typeof item.matchDurationMinutes === "number" &&
+        Number.isFinite(item.matchDurationMinutes)
+    )
+    .map((item) => ({
+      generationLabel: item.generationLabel!.trim(),
+      matchDurationMinutes: Math.max(1, Math.min(240, Math.round(item.matchDurationMinutes!))),
+    }));
 }
 
 async function resolveOrCreateSeason(
@@ -337,6 +370,7 @@ export async function createCompetition(organizationId: string, createdById: str
     return tx.competition.create({
       data: {
         ...competitionData,
+        generationMatchDurations: competitionData.generationMatchDurations as Prisma.InputJsonValue,
         organizationId,
         createdById,
         venueId: competitionData.venueId ?? null,
@@ -375,6 +409,8 @@ export async function updateCompetition(id: string, organizationId: string, acto
     teamSize: input.teamSize ?? current.teamSize,
     substitutions: input.substitutions ?? current.substitutions,
     matchDurationMinutes: input.matchDurationMinutes ?? current.matchDurationMinutes,
+    generationMatchDurations:
+      input.generationMatchDurations ?? normalizeGenerationMatchDurations(current.generationMatchDurations),
     stadiumName: input.stadiumName ?? current.stadiumName ?? "Stadion",
     pitchNames: input.pitchNames ?? current.pitchNames,
     scheduleDays: input.scheduleDays ?? normalizeScheduleDays(current.scheduleDays),
@@ -414,7 +450,11 @@ export async function updateCompetition(id: string, organizationId: string, acto
 
     const updatedCompetition = await tx.competition.update({
       where: { id },
-      data: { ...competitionData, seasonId: season.id },
+      data: {
+        ...competitionData,
+        generationMatchDurations: competitionData.generationMatchDurations as Prisma.InputJsonValue,
+        seasonId: season.id,
+      },
       include: { teams: true },
     });
     if (competitionData.type !== "TOURNAMENT") {
@@ -479,6 +519,7 @@ export async function getCompetitionById(organizationId: string, id: string) {
   return {
     ...competition,
     scheduleDays: normalizeScheduleDays(competition.scheduleDays),
+    generationMatchDurations: normalizeGenerationMatchDurations(competition.generationMatchDurations),
     seasonOptions: seasons.map((entry) => ({
       competitionId: entry.id,
       seasonId: entry.seasonId,
@@ -596,7 +637,7 @@ export async function listPlayers(organizationId: string) {
 }
 
 export async function listMatches(
-  organizationId: string,
+  _organizationId: string,
   filters?: {
     status?: "SCHEDULED" | "LIVE" | "FINISHED" | "POSTPONED" | "CANCELED";
     competitionId?: string;
@@ -604,7 +645,6 @@ export async function listMatches(
 ) {
   const matches = await prisma.match.findMany({
     where: {
-      competition: { organizationId },
       ...(filters?.status ? { status: filters.status } : {}),
       ...(filters?.competitionId ? { competitionId: filters.competitionId } : {}),
     },

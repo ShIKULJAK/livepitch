@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
+import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Select } from "@/components/ui/select";
 
 function toDateInput(value: string) {
@@ -119,7 +120,7 @@ export default function EditMatchPage() {
   }
 
   if (matchDetailsQuery.isLoading) {
-    return <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>Loading match...</Card>;
+    return <LoadingSkeleton />;
   }
 
   if (!match) {

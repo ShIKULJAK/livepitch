@@ -12,7 +12,8 @@ const scheduleDaySchema = z
   .object({
     dayLabel: z.string().trim().min(1).max(40),
     dayDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    generationLabel: z.string().regex(/^Generacija \d{4}$/),
+    generationLabel: z.union([z.literal("Sve generacije"), z.string().regex(/^Generacija \d{4}$/)]),
+    stageScope: z.enum(["ALL", "GROUP_STAGE", "KNOCKOUT"]).default("ALL"),
     pitchId: z.string().optional().nullable(),
     startTime: z.string().regex(/^\d{2}:\d{2}$/),
     endTime: z.string().regex(/^\d{2}:\d{2}$/),

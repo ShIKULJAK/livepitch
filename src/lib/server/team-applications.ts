@@ -1,15 +1,16 @@
-import { TeamApplicationStatus } from "@prisma/client";
+import { CompetitionStatus, TeamApplicationStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { canCreateCompetitions, canEditEntity } from "@/lib/permissions";
 import type { TeamApplicationInput } from "@/lib/validation/team-application";
 
 export async function listApplicableCompetitions(
   organizationId: string,
-  filters: { q?: string; type?: "TOURNAMENT" | "LEAGUE" | "FRIENDLY_MATCH" }
+  filters: { q?: string; type?: "TOURNAMENT" | "LEAGUE" | "FRIENDLY_MATCH"; sport?: "FOOTBALL" | "BASKETBALL" | "HANDBALL" | "VOLLEYBALL" }
 ) {
   const competitions = await prisma.competition.findMany({
     where: {
       organizationId,
+      status: { in: [CompetitionStatus.DRAFT, CompetitionStatus.UPCOMING] },
       ...(filters.q
         ? {
             OR: [
@@ -19,6 +20,7 @@ export async function listApplicableCompetitions(
           }
         : {}),
       ...(filters.type ? { type: filters.type } : {}),
+      ...(filters.sport ? { sport: filters.sport } : {}),
     },
     include: { season: { select: { id: true, name: true } } },
     orderBy: [{ createdAt: "desc" }],
@@ -43,9 +45,12 @@ export async function submitTeamApplication(
 ) {
   const competition = await prisma.competition.findFirst({
     where: { id: input.competitionId, organizationId },
-    select: { id: true, seasonId: true, sport: true },
+    select: { id: true, seasonId: true, sport: true, status: true },
   });
   if (!competition) throw new Error("Competition not found.");
+  if (competition.status !== CompetitionStatus.DRAFT && competition.status !== CompetitionStatus.UPCOMING) {
+    throw new Error("Prijava je dozvoljena samo za turnire u pripremnoj ili nadolazećoj fazi.");
+  }
 
   const uniqueYears = Array.from(new Set(input.generationYears)).sort((a, b) => b - a);
   const orderByGeneration = new Map<number, number>();
@@ -372,7 +377,7 @@ export async function rejectTeamApplication(
 
   const application = await prisma.teamApplication.findFirst({
     where: { id: input.applicationId, competitionId },
-    select: { id: true },
+    select: { id: true, teamId: true, generations: { select: { generationYear: true } } },
   });
   if (!application) throw new Error("Application not found.");
 
@@ -389,6 +394,41 @@ export async function rejectTeamApplication(
       where: { applicationId: application.id },
       data: { isApproved: false },
     });
+
+    if (application.teamId) {
+      const affectedGenerationYears = application.generations.map((item) => item.generationYear);
+      if (affectedGenerationYears.length) {
+        await tx.competitionTeamGeneration.updateMany({
+          where: {
+            competitionId,
+            teamId: application.teamId,
+            generationYear: { in: affectedGenerationYears },
+          },
+          data: {
+            isApproved: false,
+            approvedAt: null,
+            approvedById: null,
+          },
+        });
+      }
+
+      const hasAnyApprovedGeneration = await tx.competitionTeamGeneration.count({
+        where: {
+          competitionId,
+          teamId: application.teamId,
+          isApproved: true,
+        },
+      });
+
+      if (hasAnyApprovedGeneration === 0) {
+        await tx.competitionTeam.deleteMany({
+          where: {
+            competitionId,
+            teamId: application.teamId,
+          },
+        });
+      }
+    }
   });
 
   return { ok: true };

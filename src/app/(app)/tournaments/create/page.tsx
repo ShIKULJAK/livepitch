@@ -22,6 +22,7 @@ import { SPORT_OPTIONS } from "@/lib/constants/sports";
 import { GENERATION_LABELS } from "@/lib/constants/generation-presets";
 
 const steps = ["createCompetition.step.basic", "createCompetition.step.format", "createCompetition.step.details", "createCompetition.step.review"];
+const ALL_GENERATIONS_LABEL = "Sve generacije";
 
 type CompetitionFormValues = z.input<typeof createCompetitionSchema> & {
   startDateInput?: string;
@@ -47,7 +48,7 @@ const defaults: CompetitionFormValues = {
   generationMatchDurations: [],
   stadiumName: "Stadion",
   pitchNames: ["Teren 1"],
-  scheduleDays: [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: `Generacija ${new Date().getFullYear() - 8}`, startTime: "09:00", endTime: "19:00" }],
+  scheduleDays: [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: ALL_GENERATIONS_LABEL, stageScope: "ALL", startTime: "09:00", endTime: "19:00" }],
   seasonLabel: `${new Date().getFullYear()}/${new Date().getFullYear() + 1}`,
   participantTeamIds: [],
   format: "Knockout + Group Stage",
@@ -138,6 +139,7 @@ export default function CreateTournamentPage() {
   const teamsQuery = useTeams();
   const venuesQuery = useVenues();
   const generationOptions = GENERATION_LABELS;
+  const scheduleGenerationOptions = [ALL_GENERATIONS_LABEL, ...GENERATION_LABELS];
   const [stadiumBlocks, setStadiumBlocks] = useState<StadiumBlock[]>(() => decodeStadiumBlocks(defaults.stadiumName, defaults.pitchNames));
   const [selectedVenueIds, setSelectedVenueIds] = useState<string[]>([]);
   const [selectedPrimaryPitchName, setSelectedPrimaryPitchName] = useState<string>("");
@@ -166,7 +168,7 @@ export default function CreateTournamentPage() {
   const generationMatchDurations = useWatch({ control: form.control, name: "generationMatchDurations" }) ?? [];
   const scheduleDays =
     useWatch({ control: form.control, name: "scheduleDays" }) ??
-    [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }];
+    [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: ALL_GENERATIONS_LABEL, stageScope: "ALL", pitchId: null, startTime: "09:00", endTime: "19:00" }];
   const [teamSearch, setTeamSearch] = useState("");
   const pitchOptions = useMemo(
     () =>
@@ -527,7 +529,7 @@ export default function CreateTournamentPage() {
                 >
                   <div className="space-y-2">
                     {scheduleDays.map((day, index) => (
-                      <div key={`${index}-${day.dayDate}-${day.generationLabel}`} className="grid gap-2 md:grid-cols-[1fr_220px_1fr_130px_130px_auto]">
+                      <div key={`${index}-${day.dayDate}-${day.generationLabel}-${day.stageScope ?? "ALL"}`} className="grid gap-2 md:grid-cols-[1fr_220px_160px_1fr_130px_130px_auto]">
                         <Input
                           type="date"
                           value={day.dayDate}
@@ -547,21 +549,41 @@ export default function CreateTournamentPage() {
                             form.setValue("scheduleDays", next, { shouldDirty: true, shouldValidate: true });
                           }}
                         >
-                          {generationOptions.map((option) => (
+                          {scheduleGenerationOptions.map((option) => (
                             <option key={option} value={option}>
                               {option}
                             </option>
                           ))}
                         </Select>
                         <Select
+                          value={day.stageScope ?? "ALL"}
+                          onChange={(event) => {
+                            const next = [...scheduleDays];
+                            next[index] = {
+                              ...next[index],
+                              stageScope: event.currentTarget.value as "ALL" | "GROUP_STAGE" | "KNOCKOUT",
+                            };
+                            form.setValue("scheduleDays", next, { shouldDirty: true, shouldValidate: true });
+                          }}
+                        >
+                          <option value="ALL">Sve faze</option>
+                          <option value="GROUP_STAGE">Grupna faza</option>
+                          <option value="KNOCKOUT">Knockout</option>
+                        </Select>
+                        <Select
                           value={day.pitchId ?? ""}
+                          disabled={day.generationLabel === ALL_GENERATIONS_LABEL && (day.stageScope ?? "ALL") === "ALL"}
                           onChange={(event) => {
                             const next = [...scheduleDays];
                             next[index] = { ...next[index], pitchId: event.currentTarget.value || null };
                             form.setValue("scheduleDays", next, { shouldDirty: true, shouldValidate: true });
                           }}
                         >
-                          <option value="">Izaberi teren</option>
+                          <option value="">
+                            {day.generationLabel === ALL_GENERATIONS_LABEL && (day.stageScope ?? "ALL") === "ALL"
+                              ? "Automatski (FIFA pravilo)"
+                              : "Izaberi teren"}
+                          </option>
                           {filteredPitchOptions
                             .slice()
                             .sort((a, b) => {
@@ -576,6 +598,14 @@ export default function CreateTournamentPage() {
                               </option>
                             ))}
                         </Select>
+                        {day.generationLabel === ALL_GENERATIONS_LABEL && (day.stageScope ?? "ALL") === "ALL" ? (
+                          <span
+                            className="inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                            style={{ borderColor: "var(--primary)", color: "var(--primary)" }}
+                          >
+                            AUTO
+                          </span>
+                        ) : null}
                         <Input
                           type="time"
                           value={day.startTime}
@@ -601,7 +631,7 @@ export default function CreateTournamentPage() {
                             const next = scheduleDays.filter((_, itemIndex) => itemIndex !== index);
                               form.setValue(
                                 "scheduleDays",
-                                next.length ? next : [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }],
+                                next.length ? next : [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: ALL_GENERATIONS_LABEL, stageScope: "ALL", pitchId: null, startTime: "09:00", endTime: "19:00" }],
                                 { shouldDirty: true, shouldValidate: true }
                               );
                             }}
@@ -616,7 +646,7 @@ export default function CreateTournamentPage() {
                       onClick={() =>
                         form.setValue(
                           "scheduleDays",
-                          [...scheduleDays, { dayLabel: `Dan ${scheduleDays.length + 1}`, dayDate: new Date().toISOString().slice(0, 10), generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }],
+                          [...scheduleDays, { dayLabel: `Dan ${scheduleDays.length + 1}`, dayDate: new Date().toISOString().slice(0, 10), generationLabel: ALL_GENERATIONS_LABEL, stageScope: "ALL", pitchId: null, startTime: "09:00", endTime: "19:00" }],
                           { shouldDirty: true, shouldValidate: true }
                         )
                       }

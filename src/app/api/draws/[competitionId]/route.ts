@@ -1,16 +1,24 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { generateDraw, getDrawByCompetition, resetDraw, swapDrawGroupTeams } from "@/lib/repositories/draws";
+import { generateDraw, getDrawByCompetition, resetDraw, swapDrawGroupTeams, swapDrawPitches } from "@/lib/repositories/draws";
 import { canCreateDraws, canEditEntity } from "@/lib/permissions";
 import { drawConfigSchema } from "@/lib/validation/draw";
 import { z } from "zod";
 
-const drawSwapSchema = z.object({
-  action: z.literal("swapTeams"),
-  generationYear: z.number().int(),
-  firstTeamId: z.string().min(1),
-  secondTeamId: z.string().min(1),
-});
+const drawSwapSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("swapTeams"),
+    generationYear: z.number().int(),
+    firstTeamId: z.string().min(1),
+    secondTeamId: z.string().min(1),
+  }),
+  z.object({
+    action: z.literal("swapPitches"),
+    generationYear: z.number().int(),
+    firstPitchName: z.string().min(1),
+    secondPitchName: z.string().min(1),
+  }),
+]);
 
 export async function GET(_: Request, { params }: { params: Promise<{ competitionId: string }> }) {
   const currentUser = await requireAuth();
@@ -87,7 +95,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ com
                 .sort((a, b) => b.year - a.year)
                 .map((item) => `Generacija ${item.year}: prijavljeno ${item.participants}, fali ${item.missing}`)
                 .join(" | ")
-            : "Nema odobrenih generacija sa učesnicima.";
+            : skipped.length > 0
+              ? "Generacije postoje, ali nema dostupnih terena/termina za automatsko izvlačenje."
+              : "Nema odobrenih generacija sa učesnicima.";
         return NextResponse.json(
           {
             error: `Nema dovoljno ekipa za automatsko izvlačenje. ${byGeneration}${skipped.length ? ` | Preskočeno: ${skipped.map((item) => `Generacija ${item.year} (${item.reason})`).join(" ; ")}` : ""}`,
@@ -139,14 +149,24 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ co
 
   const { competitionId } = await params;
   try {
-    const data = await swapDrawGroupTeams(
-      currentUser.organizationId,
-      { id: currentUser.id, role: currentUser.role },
-      competitionId,
-      parsed.data.generationYear,
-      parsed.data.firstTeamId,
-      parsed.data.secondTeamId
-    );
+    const data =
+      parsed.data.action === "swapTeams"
+        ? await swapDrawGroupTeams(
+            currentUser.organizationId,
+            { id: currentUser.id, role: currentUser.role },
+            competitionId,
+            parsed.data.generationYear,
+            parsed.data.firstTeamId,
+            parsed.data.secondTeamId
+          )
+        : await swapDrawPitches(
+            currentUser.organizationId,
+            { id: currentUser.id, role: currentUser.role },
+            competitionId,
+            parsed.data.generationYear,
+            parsed.data.firstPitchName,
+            parsed.data.secondPitchName
+          );
     if (!data) {
       return NextResponse.json({ error: "Competition not found" }, { status: 404 });
     }

@@ -1,4 +1,4 @@
-import { CompetitionType } from "@prisma/client";
+import { CompetitionType, SportType } from "@prisma/client";
 import { z } from "zod";
 
 const currentYear = new Date().getFullYear();
@@ -9,6 +9,7 @@ export const teamApplicationQuerySchema = z.object({
   competitionId: z.string().optional(),
   q: z.string().optional(),
   type: z.nativeEnum(CompetitionType).optional(),
+  sport: z.nativeEnum(SportType).optional(),
 });
 
 export const teamApplicationInputSchema = z.object({

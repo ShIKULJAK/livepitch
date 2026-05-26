@@ -14,6 +14,13 @@ import { canCreateTeams, canEditEntity } from "@/lib/permissions";
 import { FavoriteTargetType } from "@prisma/client";
 import { FavoriteButton } from "@/components/ui/favorite-button";
 
+function TeamBadge({ name, profileImageUrl }: { name: string; profileImageUrl?: string | null }) {
+  if (profileImageUrl) {
+    return <img src={profileImageUrl} alt={name} className="h-4 w-4 rounded-full object-cover" loading="lazy" />;
+  }
+  return <span className="inline-flex h-4 w-4 items-center justify-center text-[10px]">🛡️</span>;
+}
+
 export default function TeamsPage() {
   const { t } = useI18n();
   const teamsQuery = useTeams();
@@ -48,27 +55,29 @@ export default function TeamsPage() {
         <div className="overflow-x-auto lp-scrollbar">
           <table className="min-w-full text-sm">
             <thead style={{ backgroundColor: "var(--surface-2)" }}>
-              <tr>{[t("table.team"), t("table.tournament"), t("table.played"), "W/D/L", t("table.goals"), t("table.points"), t("table.action")].map((h) => <th key={h} className="px-4 py-3 text-left text-xs uppercase" style={{ color: "var(--text-secondary)" }}>{h}</th>)}</tr>
+              <tr>{["#", t("table.team"), t("table.tournament"), t("table.played"), "W/D/L", t("table.goals"), t("table.points"), t("table.action")].map((h) => <th key={h} className="px-4 py-3 text-center text-xs uppercase" style={{ color: "var(--text-secondary)" }}>{h}</th>)}</tr>
             </thead>
             <tbody>
-              {rows.map((team) => (
+              {rows.map((team, index) => (
                 (() => {
                   const canEditRow = canEditEntity(user, team);
                   return (
                 <tr key={team.id} className="border-t" style={{ borderColor: "var(--border)" }}>
+                  <td className="px-4 py-3 text-center">{index + 1}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <FavoriteButton targetType={FavoriteTargetType.TEAM} targetId={team.id} />
+                      <TeamBadge name={team.name} profileImageUrl={team.profileImageUrl} />
                       <span className="font-medium">{team.name}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3">{team.competition ?? "-"}</td>
-                  <td className="px-4 py-3">{team.played}</td>
-                  <td className="px-4 py-3">{team.wins}/{team.draws}/{team.losses}</td>
-                  <td className="px-4 py-3">{team.goalsFor}:{team.goalsAgainst}</td>
-                  <td className="px-4 py-3" style={{ color: "var(--primary)" }}>{team.points}</td>
+                  <td className="px-4 py-3 text-center">{team.competition ?? "-"}</td>
+                  <td className="px-4 py-3 text-center">{team.played}</td>
+                  <td className="px-4 py-3 text-center">{team.wins}/{team.draws}/{team.losses}</td>
+                  <td className="px-4 py-3 text-center">{team.goalsFor}:{team.goalsAgainst}</td>
+                  <td className="px-4 py-3 text-center" style={{ color: "var(--primary)" }}>{team.points}</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center gap-3">
                       <Link href={`/teams/${team.id}`} style={{ color: "var(--primary)" }}>{t("common.open")}</Link>
                       {canEditRow ? (
                         <>

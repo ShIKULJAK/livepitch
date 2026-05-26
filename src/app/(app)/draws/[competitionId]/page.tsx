@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { useCompetitionDraw, useGenerateDraw, useResetDraw, useSwapDrawTeams } from "@/hooks/use-competitions";
+import { useCompetitionDraw, useGenerateDraw, useResetDraw, useSwapDrawPitches, useSwapDrawTeams } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { canCreateDraws } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
@@ -42,6 +42,7 @@ export default function CompetitionDrawPage() {
   const generateDraw = useGenerateDraw(params.competitionId);
   const resetDraw = useResetDraw(params.competitionId);
   const swapDrawTeams = useSwapDrawTeams(params.competitionId);
+  const swapDrawPitches = useSwapDrawPitches(params.competitionId);
 
   const [draftConfig, setDraftConfig] = useState<{
     groupStageEnabled?: boolean;
@@ -52,6 +53,8 @@ export default function CompetitionDrawPage() {
   }>({});
   const [swapFirstTeamId, setSwapFirstTeamId] = useState("");
   const [swapSecondTeamId, setSwapSecondTeamId] = useState("");
+  const [swapFirstPitchName, setSwapFirstPitchName] = useState("");
+  const [swapSecondPitchName, setSwapSecondPitchName] = useState("");
   const generationYears = drawQuery.data?.competition.availableGenerationYears ?? [];
   const activeGeneration = drawQuery.data?.competition.selectedGenerationYear ?? generationYears[0] ?? null;
 
@@ -157,6 +160,33 @@ export default function CompetitionDrawPage() {
     }
   }
 
+  async function onSwapPitches() {
+    setGenerateError(null);
+    setSwapSuccess(null);
+    if (!selectedGenerationYear) {
+      setGenerateError("Nije odabrana generacija.");
+      return;
+    }
+    if (!swapFirstPitchName || !swapSecondPitchName) {
+      setGenerateError("Odaberi oba terena za switch.");
+      return;
+    }
+    if (swapFirstPitchName === swapSecondPitchName) {
+      setGenerateError("Odaberi dva različita terena.");
+      return;
+    }
+    try {
+      await swapDrawPitches.mutateAsync({
+        generationYear: selectedGenerationYear,
+        firstPitchName: swapFirstPitchName,
+        secondPitchName: swapSecondPitchName,
+      });
+      setSwapSuccess("Zamjena terena je sačuvana i raspored je ažuriran.");
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : "Greška pri zamjeni terena.");
+    }
+  }
+
   const rounds = draw?.knockoutRounds ? [...draw.knockoutRounds].sort((a, b) => a.order - b.order) : [];
   const roundOf16 = rounds.find((round) => round.roundType === "ROUND_OF_16");
   const quarterfinals = rounds.find((round) => round.roundType === "QUARTERFINAL");
@@ -172,6 +202,14 @@ export default function CompetitionDrawPage() {
       label: `Grupa ${group.name} - ${entry.team.name}`,
     }))
   );
+  const pitchOptions = Array.from(
+    new Set(
+      [
+        ...(draw?.groupMatches ?? []).map((match) => match.pitchName ?? "").filter(Boolean),
+        ...rounds.flatMap((round) => round.matches.map((match) => match.pitchName ?? "").filter(Boolean)),
+      ].map((value) => value.trim())
+    )
+  ).sort((a, b) => a.localeCompare(b));
 
   const r16Left = roundOf16?.matches?.slice(0, Math.ceil((roundOf16.matches.length ?? 0) / 2)) ?? [];
   const r16Right = roundOf16?.matches?.slice(Math.ceil((roundOf16.matches.length ?? 0) / 2)) ?? [];
@@ -461,33 +499,63 @@ export default function CompetitionDrawPage() {
           <Card className="space-y-3 p-5">
             <h3 className="text-lg font-semibold">Groups</h3>
             {canManage && draw?.groups.length ? (
-              <div className="grid gap-2 rounded-xl border p-3 md:grid-cols-[1fr_1fr_auto]" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
-                <Select value={swapFirstTeamId} onChange={(event) => setSwapFirstTeamId(event.currentTarget.value)}>
-                  <option value="">Odaberi prvu ekipu</option>
-                  {groupTeamOptions.map((item) => (
-                    <option key={`first-${item.teamId}`} value={item.teamId}>
-                      {item.label}
-                    </option>
-                  ))}
-                </Select>
-                <Select value={swapSecondTeamId} onChange={(event) => setSwapSecondTeamId(event.currentTarget.value)}>
-                  <option value="">Odaberi drugu ekipu</option>
-                  {groupTeamOptions
-                    .filter((item) => item.teamId !== swapFirstTeamId)
-                    .map((item) => (
-                      <option key={`second-${item.teamId}`} value={item.teamId}>
+              <div className="space-y-2 rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
+                <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                  <Select value={swapFirstTeamId} onChange={(event) => setSwapFirstTeamId(event.currentTarget.value)}>
+                    <option value="">Odaberi prvu ekipu</option>
+                    {groupTeamOptions.map((item) => (
+                      <option key={`first-${item.teamId}`} value={item.teamId}>
                         {item.label}
                       </option>
                     ))}
-                </Select>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => void onSwapTeams()}
-                  disabled={swapDrawTeams.isPending || !swapFirstTeamId || !swapSecondTeamId}
-                >
-                  {swapDrawTeams.isPending ? "Switch..." : "Switch ekipa"}
-                </Button>
+                  </Select>
+                  <Select value={swapSecondTeamId} onChange={(event) => setSwapSecondTeamId(event.currentTarget.value)}>
+                    <option value="">Odaberi drugu ekipu</option>
+                    {groupTeamOptions
+                      .filter((item) => item.teamId !== swapFirstTeamId)
+                      .map((item) => (
+                        <option key={`second-${item.teamId}`} value={item.teamId}>
+                          {item.label}
+                        </option>
+                      ))}
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void onSwapTeams()}
+                    disabled={swapDrawTeams.isPending || !swapFirstTeamId || !swapSecondTeamId}
+                  >
+                    {swapDrawTeams.isPending ? "Switch..." : "Switch ekipa"}
+                  </Button>
+                </div>
+                <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                  <Select value={swapFirstPitchName} onChange={(event) => setSwapFirstPitchName(event.currentTarget.value)}>
+                    <option value="">Odaberi prvi teren</option>
+                    {pitchOptions.map((pitch) => (
+                      <option key={`pitch-first-${pitch}`} value={pitch}>
+                        {pitch}
+                      </option>
+                    ))}
+                  </Select>
+                  <Select value={swapSecondPitchName} onChange={(event) => setSwapSecondPitchName(event.currentTarget.value)}>
+                    <option value="">Odaberi drugi teren</option>
+                    {pitchOptions
+                      .filter((pitch) => pitch !== swapFirstPitchName)
+                      .map((pitch) => (
+                        <option key={`pitch-second-${pitch}`} value={pitch}>
+                          {pitch}
+                        </option>
+                      ))}
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void onSwapPitches()}
+                    disabled={swapDrawPitches.isPending || !swapFirstPitchName || !swapSecondPitchName}
+                  >
+                    {swapDrawPitches.isPending ? "Switch..." : "Switch terena"}
+                  </Button>
+                </div>
               </div>
             ) : null}
             {draw?.groups.length ? (
@@ -516,6 +584,43 @@ export default function CompetitionDrawPage() {
                         <p style={{ color: "var(--text-secondary)" }}>{formatVenueDisplay(match.venueLabel, match.pitchName)}</p>
                       </div>
                     ))}
+                  </div>
+                  <div className="mt-4">
+                    <p className="mb-2 font-semibold">Knockout faza</p>
+                    <div className="max-h-[300px] space-y-2 overflow-auto text-xs">
+                      {rounds.map((round) => (
+                        <div key={round.id} className="rounded-lg border p-2" style={{ borderColor: "var(--border)" }}>
+                          <p className="mb-1 text-[11px] font-semibold" style={{ color: "#9BEA3C" }}>
+                            {round.roundType === "ROUND_OF_16"
+                              ? "1/8 FINALA"
+                              : round.roundType === "QUARTERFINAL"
+                                ? "1/4 FINALA"
+                                : round.roundType === "SEMIFINAL"
+                                  ? "1/2 FINALA"
+                                  : round.roundType === "FINAL"
+                                    ? "FINALE"
+                                    : "UTAKMICA ZA 3. MJESTO"}
+                          </p>
+                          <div className="space-y-1">
+                            {round.matches.map((match, idx) => {
+                              const labels = teamLabel(match);
+                              return (
+                                <div key={match.id} className="rounded-md border p-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface)" }}>
+                                  <p style={{ color: "var(--text-secondary)" }}>Utakmica {idx + 1}</p>
+                                  <p className="flex items-center gap-1 truncate"><TeamMark name={labels.home.name} imageUrl={labels.home.imageUrl} />{labels.home.name}</p>
+                                  <p className="flex items-center gap-1 truncate"><TeamMark name={labels.away.name} imageUrl={labels.away.imageUrl} />{labels.away.name}</p>
+                                  {match.scheduledAt ? <p style={{ color: "var(--text-secondary)" }}>{formatKickoff(match.scheduledAt)}</p> : null}
+                                  <p style={{ color: "var(--text-secondary)" }}>{formatVenueDisplay(match.venueLabel, match.pitchName)}</p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                      {!rounds.length ? (
+                        <p style={{ color: "var(--text-secondary)" }}>Knockout faza jos nije kreirana.</p>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               </div>

@@ -36,6 +36,21 @@ function isAwayWinner(status: MatchStatus, homeScore: number | null, awayScore: 
   return awayScore > homeScore;
 }
 
+function TeamBadge({ name, profileImageUrl }: { name: string; profileImageUrl?: string | null }) {
+  if (profileImageUrl) {
+    return (
+      <img
+        src={profileImageUrl}
+        alt={name}
+        className="h-4 w-4 rounded-full object-cover"
+        loading="lazy"
+      />
+    );
+  }
+
+  return <span className="inline-flex h-4 w-4 items-center justify-center text-[10px]">🛡️</span>;
+}
+
 function MatchesPageContent() {
   const { t } = useI18n();
   const searchParams = useSearchParams();
@@ -273,6 +288,7 @@ function MatchesPageContent() {
                           {generationMatches.map((match) => (
                             (() => {
                               const canEditRow = canEditEntity(user, match);
+                              const isVirtualKnockout = Boolean(match.isVirtualKnockout);
                               return (
                                 <tr key={match.id} className="border-t" style={{ borderColor: "var(--border)" }}>
                                   <td className="px-4 py-3">{formatDateDDMMYYYY(match.scheduledAt)}</td>
@@ -282,13 +298,19 @@ function MatchesPageContent() {
                                       <FavoriteButton targetType={FavoriteTargetType.MATCH} targetId={match.id} className="mt-0.5" />
                                       <div className="min-w-[220px] space-y-1">
                                         <div className="flex items-center justify-between gap-3">
-                                          <span className={isHomeWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}>{match.homeTeam}</span>
+                                          <span className={`flex items-center gap-1.5 ${isHomeWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}`}>
+                                            <TeamBadge name={match.homeTeam} profileImageUrl={match.homeTeamProfileImageUrl} />
+                                            {match.homeTeam}
+                                          </span>
                                           <span className={isHomeWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}>
                                             {match.homeScore ?? (match.status === "SCHEDULED" ? "-" : "")}
                                           </span>
                                         </div>
                                         <div className="flex items-center justify-between gap-3">
-                                          <span className={isAwayWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}>{match.awayTeam}</span>
+                                          <span className={`flex items-center gap-1.5 ${isAwayWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}`}>
+                                            <TeamBadge name={match.awayTeam} profileImageUrl={match.awayTeamProfileImageUrl} />
+                                            {match.awayTeam}
+                                          </span>
                                           <span className={isAwayWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}>
                                             {match.awayScore ?? (match.status === "SCHEDULED" ? "-" : "")}
                                           </span>
@@ -303,10 +325,14 @@ function MatchesPageContent() {
                                   </td>
                                   <td className="px-4 py-3">
                                     <div className="flex items-center gap-3">
-                                      <Link href={`/matches/${match.id}`} style={{ color: "var(--primary)" }}>
-                                        {t("common.open")}
-                                      </Link>
-                                      {canEditRow ? (
+                                      {!isVirtualKnockout ? (
+                                        <Link href={`/matches/${match.id}`} style={{ color: "var(--primary)" }}>
+                                          {t("common.open")}
+                                        </Link>
+                                      ) : (
+                                        <span style={{ color: "var(--text-secondary)" }}>Knockout</span>
+                                      )}
+                                      {canEditRow && !isVirtualKnockout ? (
                                         <>
                                           <Link href={`/matches/${match.id}/edit`} style={{ color: "var(--info)" }}>
                                             Edit

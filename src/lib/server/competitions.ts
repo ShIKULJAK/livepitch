@@ -251,6 +251,10 @@ function sanitizeCompetitionInput(input: CreateCompetitionInput) {
       dayLabel: day.dayLabel.trim(),
       dayDate: day.dayDate,
       generationLabel: day.generationLabel,
+      stageScope:
+        day.stageScope === "GROUP_STAGE" || day.stageScope === "KNOCKOUT" || day.stageScope === "ALL"
+          ? day.stageScope
+          : "ALL",
       pitchId: day.pitchId ?? null,
       startTime: day.startTime,
       endTime: day.endTime,
@@ -261,11 +265,19 @@ function sanitizeCompetitionInput(input: CreateCompetitionInput) {
   };
 }
 
-type ScheduleDayRaw = { dayLabel?: string; dayDate?: string; generationLabel?: string; pitchId?: string | null; startTime?: string; endTime?: string };
+type ScheduleDayRaw = {
+  dayLabel?: string;
+  dayDate?: string;
+  generationLabel?: string;
+  stageScope?: "ALL" | "GROUP_STAGE" | "KNOCKOUT" | string;
+  pitchId?: string | null;
+  startTime?: string;
+  endTime?: string;
+};
 type GenerationMatchDurationRaw = { generationLabel?: string; matchDurationMinutes?: number };
 
 function normalizeScheduleDays(value: unknown) {
-  const fallback = [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: "Generacija 2018", pitchId: null, startTime: "09:00", endTime: "19:00" }];
+  const fallback = [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: "Sve generacije", stageScope: "ALL" as const, pitchId: null, startTime: "09:00", endTime: "19:00" }];
   if (!Array.isArray(value)) return fallback;
 
   const normalized = value
@@ -275,7 +287,12 @@ function normalizeScheduleDays(value: unknown) {
       dayLabel: day.dayLabel!.trim(),
       dayDate: typeof day.dayDate === "string" && day.dayDate.trim().length > 0 ? day.dayDate : new Date().toISOString().slice(0, 10),
       generationLabel:
-        typeof day.generationLabel === "string" && day.generationLabel.trim().length > 0 ? day.generationLabel : "Generacija 2018",
+        typeof day.generationLabel === "string" && day.generationLabel.trim().length > 0 ? day.generationLabel : "Sve generacije",
+      stageScope:
+        (day.stageScope === "GROUP_STAGE" || day.stageScope === "KNOCKOUT" || day.stageScope === "ALL" ? day.stageScope : "ALL") as
+          | "ALL"
+          | "GROUP_STAGE"
+          | "KNOCKOUT",
       pitchId: typeof day.pitchId === "string" && day.pitchId.trim().length > 0 ? day.pitchId : null,
       startTime: day.startTime!,
       endTime: day.endTime!,
@@ -657,7 +674,39 @@ export async function listMatches(
     orderBy: { scheduledAt: "asc" },
   });
 
-  return matches.map((match) => ({
+  const includeKnockout = !filters?.status || filters.status === "SCHEDULED";
+  const knockoutMatches = includeKnockout
+    ? await prisma.drawKnockoutMatch.findMany({
+        where: {
+          scheduledAt: { not: null },
+          round: {
+            draw: {
+              competition: {
+                ...(filters?.competitionId ? { id: filters.competitionId } : {}),
+              },
+            },
+          },
+        },
+        include: {
+          round: {
+            include: {
+              draw: {
+                include: {
+                  competition: {
+                    include: { season: { select: { id: true, name: true } } },
+                  },
+                },
+              },
+            },
+          },
+          homeTeam: true,
+          awayTeam: true,
+        },
+        orderBy: [{ scheduledAt: "asc" }],
+      })
+    : [];
+
+  const regularRows = matches.map((match) => ({
     id: match.id,
     createdById: match.createdById,
     competitionId: match.competitionId,
@@ -672,7 +721,9 @@ export async function listMatches(
     homeTeamId: match.homeTeamId,
     awayTeamId: match.awayTeamId,
     homeTeam: match.homeTeam.name,
+    homeTeamProfileImageUrl: match.homeTeam.profileImageUrl ?? null,
     awayTeam: match.awayTeam.name,
+    awayTeamProfileImageUrl: match.awayTeam.profileImageUrl ?? null,
     homeScore: match.homeScore,
     awayScore: match.awayScore,
     liveMinute: match.liveMinute,
@@ -681,6 +732,49 @@ export async function listMatches(
     venueLabel: match.venueLabel ?? null,
     pitchName: match.pitchName ?? null,
   }));
+
+  const knockoutRows = knockoutMatches.map((match) => {
+    const competition = match.round.draw.competition;
+    const roundTypeLabel =
+      match.round.roundType === "ROUND_OF_16"
+        ? "1/8 FINALA"
+        : match.round.roundType === "QUARTERFINAL"
+          ? "1/4 FINALA"
+          : match.round.roundType === "SEMIFINAL"
+            ? "1/2 FINALA"
+            : match.round.roundType === "FINAL"
+              ? "FINALE"
+              : "UTAKMICA ZA 3. MJESTO";
+    return {
+      id: `ko-${match.id}`,
+      createdById: competition.createdById,
+      competitionId: competition.id,
+      competition: competition.name,
+      seasonId: competition.seasonId,
+      seasonLabel: competition.season?.name ?? null,
+      competitionType: competition.type,
+      generationYear: match.round.draw.generationYear ?? null,
+      round: `${roundTypeLabel} - Utakmica ${match.order}`,
+      scheduledAt: match.scheduledAt as Date,
+      status: "SCHEDULED" as const,
+      homeTeamId: match.homeTeamId ?? `source-${match.id}-home`,
+      awayTeamId: match.awayTeamId ?? `source-${match.id}-away`,
+      homeTeam: match.homeTeam?.name ?? match.homeSourceValue,
+      awayTeam: match.awayTeam?.name ?? match.awaySourceValue,
+      homeTeamProfileImageUrl: match.homeTeam?.profileImageUrl ?? null,
+      awayTeamProfileImageUrl: match.awayTeam?.profileImageUrl ?? null,
+      homeScore: null,
+      awayScore: null,
+      liveMinute: null,
+      regularTimeMinutes: competition.matchDurationMinutes,
+      venue: match.venueLabel ?? match.pitchName ?? "Teren",
+      venueLabel: match.venueLabel ?? null,
+      pitchName: match.pitchName ?? null,
+      isVirtualKnockout: true,
+    };
+  });
+
+  return [...regularRows, ...knockoutRows].sort((a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime());
 }
 
 export async function getSeasonTeamPlayerRegistrations(organizationId: string, competitionId: string) {

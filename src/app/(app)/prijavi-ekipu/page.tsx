@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { CompetitionType } from "@prisma/client";
+import { CompetitionType, SportType } from "@prisma/client";
 import { useApplicableCompetitions } from "@/hooks/use-competitions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
@@ -13,7 +13,8 @@ import { Select } from "@/components/ui/select";
 export default function TeamApplicationsEntryPage() {
   const [query, setQuery] = useState("");
   const [type, setType] = useState<CompetitionType | "ALL">("ALL");
-  const competitionsQuery = useApplicableCompetitions({ q: query || undefined, type });
+  const [sport, setSport] = useState<SportType | "ALL">("ALL");
+  const competitionsQuery = useApplicableCompetitions({ q: query || undefined, type, sport });
 
   const isLoadingCompetitions = competitionsQuery.isLoading || competitionsQuery.isFetching;
   const empty = useMemo(
@@ -36,6 +37,13 @@ export default function TeamApplicationsEntryPage() {
           <option value={CompetitionType.TOURNAMENT}>Turnir</option>
           <option value={CompetitionType.LEAGUE}>Liga</option>
           <option value={CompetitionType.FRIENDLY_MATCH}>Prijateljske</option>
+        </Select>
+        <Select className="w-56" value={sport} onChange={(event) => setSport(event.currentTarget.value as SportType | "ALL")}>
+          <option value="ALL">Svi sportovi</option>
+          <option value={SportType.FOOTBALL}>Football</option>
+          <option value={SportType.BASKETBALL}>Basketball</option>
+          <option value={SportType.HANDBALL}>Handball</option>
+          <option value={SportType.VOLLEYBALL}>Volleyball</option>
         </Select>
       </FilterBar>
 

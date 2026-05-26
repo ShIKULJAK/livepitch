@@ -29,6 +29,7 @@ export async function GET(request: Request) {
   const parsed = teamApplicationQuerySchema.safeParse({
     q: searchParams.get("q") ?? undefined,
     type: searchParams.get("type") ?? undefined,
+    sport: searchParams.get("sport") ?? undefined,
   });
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid filters", issues: parsed.error.issues }, { status: 400 });

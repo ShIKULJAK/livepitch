@@ -39,6 +39,7 @@ function toIsoDate(value?: string) {
 
 type StadiumBlock = { stadiumName: string; pitchNames: string[] };
 const STADIUM_PITCH_SEPARATOR = " - ";
+const ALL_GENERATIONS_LABEL = "Sve generacije";
 
 function parsePitchEntry(rawPitch: string, fallbackStadium: string) {
   const value = rawPitch.trim();
@@ -148,9 +149,10 @@ export default function EditCompetitionPage() {
     participantTeamIds?: string[];
     stadiumName?: string;
     pitchNames?: string[];
-    scheduleDays?: Array<{ dayLabel: string; dayDate: string; generationLabel: string; pitchId?: string | null; startTime: string; endTime: string }>;
+    scheduleDays?: Array<{ dayLabel: string; dayDate: string; generationLabel: string; stageScope?: "ALL" | "GROUP_STAGE" | "KNOCKOUT"; pitchId?: string | null; startTime: string; endTime: string }>;
   }>({});
   const generationOptions = GENERATION_LABELS;
+  const scheduleGenerationOptions = [ALL_GENERATIONS_LABEL, ...GENERATION_LABELS];
 
   const canEditByRole = canCreateCompetitions(user?.role);
   const competition = competitionQuery.data;
@@ -162,12 +164,13 @@ export default function EditCompetitionPage() {
   const stadiumBlocks = decodeStadiumBlocks(draft.stadiumName ?? competition?.stadiumName, pitchNames);
   const scheduleDays = (
     draft.scheduleDays ??
-    (competition?.scheduleDays as Array<{ dayLabel: string; dayDate?: string; generationLabel: string; pitchId?: string | null; startTime: string; endTime: string }> | null) ??
-    [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }]
+    (competition?.scheduleDays as Array<{ dayLabel: string; dayDate?: string; generationLabel: string; stageScope?: "ALL" | "GROUP_STAGE" | "KNOCKOUT"; pitchId?: string | null; startTime: string; endTime: string }> | null) ??
+    [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: ALL_GENERATIONS_LABEL, stageScope: "ALL", pitchId: null, startTime: "09:00", endTime: "19:00" }]
   ).map((day) => ({
     ...day,
     dayDate: day.dayDate ?? new Date().toISOString().slice(0, 10),
     dayLabel: day.dayLabel || day.dayDate || "Dan 1",
+    stageScope: day.stageScope ?? "ALL",
   }));
   const pitchOptions = useMemo(
     () =>
@@ -224,6 +227,7 @@ export default function EditCompetitionPage() {
         ...day,
         dayDate: day.dayDate ?? new Date().toISOString().slice(0, 10),
         dayLabel: day.dayLabel || day.dayDate || "Dan 1",
+        stageScope: day.stageScope ?? "ALL",
       })),
       teamCount: Number(draft.teamCount ?? (competition.teamCount ? String(competition.teamCount) : "0")) || null,
       maxTeams: Number(draft.maxTeams ?? (competition.maxTeams ? String(competition.maxTeams) : "0")) || null,
@@ -519,7 +523,7 @@ export default function EditCompetitionPage() {
             <FormField label="Dani i satnica" tooltip="Dodaj dane turnira i vremenski opseg (od-do) za planiranje utakmica.">
               <div className="space-y-2">
                 {scheduleDays.map((day, index) => (
-                  <div key={`${index}-${day.dayDate ?? day.dayLabel}`} className="grid gap-2 md:grid-cols-[1fr_220px_1fr_130px_130px_auto]">
+                    <div key={`${index}-${day.dayDate ?? day.dayLabel}-${day.generationLabel}-${day.stageScope ?? "ALL"}`} className="grid gap-2 md:grid-cols-[1fr_220px_160px_1fr_130px_130px_auto]">
                     <Input
                       type="date"
                       value={day.dayDate ?? ""}
@@ -529,31 +533,59 @@ export default function EditCompetitionPage() {
                         setDraft((current) => ({ ...current, scheduleDays: next }));
                       }}
                     />
-                    <Select
-                      value={day.generationLabel}
+                      <Select
+                        value={day.generationLabel}
+                        onChange={(event) => {
+                          const next = [...scheduleDays];
+                          const generationLabel = event.currentTarget.value;
+                          const compatiblePitch = pitchOptions.find((pitch) => pitch.generationLabel === generationLabel);
+                          const isAuto = generationLabel === ALL_GENERATIONS_LABEL && (next[index].stageScope ?? "ALL") === "ALL";
+                          next[index] = {
+                            ...next[index],
+                            generationLabel,
+                            pitchId: isAuto ? null : compatiblePitch?.id ?? next[index].pitchId ?? null,
+                          };
+                          setDraft((current) => ({ ...current, scheduleDays: next }));
+                        }}
+                      >
+                        {scheduleGenerationOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </Select>
+                      <Select
+                        value={day.stageScope ?? "ALL"}
                       onChange={(event) => {
                         const next = [...scheduleDays];
-                        const generationLabel = event.target.value;
-                        const compatiblePitch = pitchOptions.find((pitch) => pitch.generationLabel === generationLabel);
-                        next[index] = { ...next[index], generationLabel, pitchId: compatiblePitch?.id ?? next[index].pitchId ?? null };
+                        const stageScope = event.currentTarget.value as "ALL" | "GROUP_STAGE" | "KNOCKOUT";
+                        const isAuto = next[index].generationLabel === ALL_GENERATIONS_LABEL && stageScope === "ALL";
+                        next[index] = {
+                          ...next[index],
+                          stageScope,
+                          pitchId: isAuto ? null : next[index].pitchId ?? null,
+                        };
                         setDraft((current) => ({ ...current, scheduleDays: next }));
                       }}
                     >
-                      {generationOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
+                      <option value="ALL">Sve faze</option>
+                      <option value="GROUP_STAGE">Grupna faza</option>
+                      <option value="KNOCKOUT">Knockout</option>
                     </Select>
                     <Select
                       value={day.pitchId ?? ""}
-                      onChange={(event) => {
-                        const next = [...scheduleDays];
-                        next[index] = { ...next[index], pitchId: event.target.value || null };
-                        setDraft((current) => ({ ...current, scheduleDays: next }));
-                      }}
-                    >
-                      <option value="">Izaberi teren</option>
+                        disabled={day.generationLabel === ALL_GENERATIONS_LABEL && (day.stageScope ?? "ALL") === "ALL"}
+                        onChange={(event) => {
+                          const next = [...scheduleDays];
+                          next[index] = { ...next[index], pitchId: event.currentTarget.value || null };
+                          setDraft((current) => ({ ...current, scheduleDays: next }));
+                        }}
+                      >
+                      <option value="">
+                        {day.generationLabel === ALL_GENERATIONS_LABEL && (day.stageScope ?? "ALL") === "ALL"
+                          ? "Automatski (FIFA pravilo)"
+                          : "Izaberi teren"}
+                      </option>
                       {pitchOptions
                         .slice()
                         .sort((a, b) => {
@@ -568,30 +600,38 @@ export default function EditCompetitionPage() {
                           </option>
                         ))}
                     </Select>
-                    <Input
-                      type="time"
-                      value={day.startTime}
-                      onChange={(event) => {
-                        const next = [...scheduleDays];
-                        next[index] = { ...next[index], startTime: event.target.value };
-                        setDraft((current) => ({ ...current, scheduleDays: next }));
-                      }}
-                    />
-                    <Input
-                      type="time"
-                      value={day.endTime}
-                      onChange={(event) => {
-                        const next = [...scheduleDays];
-                        next[index] = { ...next[index], endTime: event.target.value };
-                        setDraft((current) => ({ ...current, scheduleDays: next }));
-                      }}
-                    />
+                    {day.generationLabel === ALL_GENERATIONS_LABEL && (day.stageScope ?? "ALL") === "ALL" ? (
+                      <span
+                        className="inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                        style={{ borderColor: "var(--primary)", color: "var(--primary)" }}
+                      >
+                        AUTO
+                      </span>
+                    ) : null}
+                      <Input
+                        type="time"
+                        value={day.startTime}
+                        onChange={(event) => {
+                          const next = [...scheduleDays];
+                          next[index] = { ...next[index], startTime: event.currentTarget.value };
+                          setDraft((current) => ({ ...current, scheduleDays: next }));
+                        }}
+                      />
+                      <Input
+                        type="time"
+                        value={day.endTime}
+                        onChange={(event) => {
+                          const next = [...scheduleDays];
+                          next[index] = { ...next[index], endTime: event.currentTarget.value };
+                          setDraft((current) => ({ ...current, scheduleDays: next }));
+                        }}
+                      />
                     {scheduleDays.length > 1 ? (
                       <Button
                         type="button"
                         onClick={() => {
                           const next = scheduleDays.filter((_, itemIndex) => itemIndex !== index);
-                          setDraft((current) => ({ ...current, scheduleDays: next.length ? next : [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }] }));
+                          setDraft((current) => ({ ...current, scheduleDays: next.length ? next : [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: ALL_GENERATIONS_LABEL, stageScope: "ALL", pitchId: null, startTime: "09:00", endTime: "19:00" }] }));
                         }}
                       >
                         -
@@ -604,7 +644,7 @@ export default function EditCompetitionPage() {
                   onClick={() =>
                     setDraft((current) => ({
                       ...current,
-                      scheduleDays: [...scheduleDays, { dayLabel: `Dan ${scheduleDays.length + 1}`, dayDate: new Date().toISOString().slice(0, 10), generationLabel: generationOptions[0], pitchId: null, startTime: "09:00", endTime: "19:00" }],
+                      scheduleDays: [...scheduleDays, { dayLabel: `Dan ${scheduleDays.length + 1}`, dayDate: new Date().toISOString().slice(0, 10), generationLabel: ALL_GENERATIONS_LABEL, stageScope: "ALL", pitchId: null, startTime: "09:00", endTime: "19:00" }],
                     }))
                   }
                 >

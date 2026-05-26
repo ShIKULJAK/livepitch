@@ -108,14 +108,15 @@ export default function PlayersPage() {
         <div className="overflow-x-auto lp-scrollbar">
           <table className="min-w-full text-sm">
             <thead style={{ backgroundColor: "var(--surface-2)" }}>
-              <tr>{["Player", "Team", "Pos", "Age", "Number", "Action"].map((h) => <th key={h} className="px-4 py-3 text-left text-xs uppercase" style={{ color: "var(--text-secondary)" }}>{h}</th>)}</tr>
+              <tr>{["#", "Player", "Team", "Pos", "Age", "Number", "Action"].map((h) => <th key={h} className="px-4 py-3 text-center text-xs uppercase" style={{ color: "var(--text-secondary)" }}>{h}</th>)}</tr>
             </thead>
             <tbody>
-              {rows.map((player) => (
+              {rows.map((player, index) => (
                 (() => {
                   const canEditRow = canEditEntity(user, player);
                   return (
                 <tr key={player.id} className="border-t" style={{ borderColor: "var(--border)" }}>
+                  <td className="px-4 py-3 text-center">{index + 1}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       {player.profileImageUrl ? (
@@ -139,12 +140,12 @@ export default function PlayersPage() {
                       <span className="font-medium">{player.fullName}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3">{player.team}</td>
-                  <td className="px-4 py-3">{player.position}</td>
-                  <td className="px-4 py-3">{player.age ?? ""}</td>
-                  <td className="px-4 py-3">{player.number ?? ""}</td>
+                  <td className="px-4 py-3 text-center">{player.team}</td>
+                  <td className="px-4 py-3 text-center">{player.position}</td>
+                  <td className="px-4 py-3 text-center">{player.age ?? ""}</td>
+                  <td className="px-4 py-3 text-center">{player.number ?? ""}</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center gap-3">
                       <Link href={`/players/${player.id}`} style={{ color: "var(--primary)" }}>{t("common.open")}</Link>
                       {canEditRow ? (
                         <>

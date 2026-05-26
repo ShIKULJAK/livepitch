@@ -54,6 +54,43 @@ function clampTextToWidth(text: string, font: any, fontSize: number, maxWidth: n
   return `${value}\u2026`;
 }
 
+function wrapTextToWidth(text: string, font: any, fontSize: number, maxWidth: number) {
+  if (!text.trim()) return [""];
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidth) {
+      current = candidate;
+      continue;
+    }
+
+    if (current) lines.push(current);
+
+    if (font.widthOfTextAtSize(word, fontSize) <= maxWidth) {
+      current = word;
+      continue;
+    }
+
+    let chunk = "";
+    for (const ch of word) {
+      const test = `${chunk}${ch}`;
+      if (font.widthOfTextAtSize(test, fontSize) <= maxWidth) {
+        chunk = test;
+      } else {
+        if (chunk) lines.push(chunk);
+        chunk = ch;
+      }
+    }
+    current = chunk;
+  }
+
+  if (current) lines.push(current);
+  return lines.length ? lines : [text];
+}
+
 async function buildSchedulePdf(
   matches: Awaited<ReturnType<typeof listMatchesForExport>>,
   fileDateLabel: string,
@@ -167,6 +204,7 @@ async function buildSchedulePdf(
   };
 
   const columns = [
+    { key: "index", label: "#", width: 24 },
     { key: "date", label: "Datum", width: 60 },
     { key: "time", label: "Vrijeme", width: 50 },
     { key: "comp", label: "Takmicenje", width: 125 },
@@ -176,7 +214,7 @@ async function buildSchedulePdf(
     { key: "match", label: "Par", width: 210 },
     { key: "score", label: "Rez.", width: 44 },
     { key: "status", label: "Status", width: 66 },
-    { key: "venue", label: "Lokacija", width: 121 },
+    { key: "venue", label: "Lokacija", width: 160 },
   ] as const;
 
   const baseTableWidth = columns.reduce((acc, item) => acc + item.width, 0);
@@ -192,7 +230,7 @@ async function buildSchedulePdf(
   });
   const tableWidth = scaledWidths.reduce((acc, item) => acc + item, 0);
   const headerHeight = 24;
-  const rowHeight = 22;
+  const baseRowHeight = 22;
   const tableX = cardX;
   const tableFontSize = 7.5;
   const tableMinFontSize = 6.8;
@@ -208,15 +246,20 @@ async function buildSchedulePdf(
       borderWidth: 1,
     });
     let x = tableX + 6;
-    for (const column of columns) {
-      page.drawText(toPdfText(column.label), {
-        x,
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+      const column = columns[columnIndex];
+      const cellWidth = scaledWidths[columnIndex];
+      const label = toPdfText(column.label);
+      const labelWidth = fontBold.widthOfTextAtSize(label, 9);
+      const labelX = x + Math.max(0, (cellWidth - labelWidth) / 2);
+      page.drawText(label, {
+        x: labelX,
         y: cursorY - 16,
         size: 9,
         font: fontBold,
         color: colors.accent,
       });
-      x += scaledWidths[columns.findIndex((c) => c.key === column.key)];
+      x += cellWidth;
     }
     cursorY -= headerHeight;
   };
@@ -229,7 +272,7 @@ async function buildSchedulePdf(
   };
 
   const ensureSpace = () => {
-    if (cursorY - rowHeight < margin + 18) {
+    if (cursorY - baseRowHeight < margin + 18) {
       page = doc.addPage([842, 595]);
       cursorY = pageSize.height - margin;
       drawPageBackground();
@@ -256,6 +299,7 @@ async function buildSchedulePdf(
     ensureSpace();
     const date = new Date(match.scheduledAt);
     const row = {
+      index: String(index + 1),
       date: formatDateDDMMYYYY(date),
       time: date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       comp: truncate(match.competition.name, 60),
@@ -269,6 +313,22 @@ async function buildSchedulePdf(
     };
 
     const rowBg = index % 2 === 0 ? colors.panel : colors.panelAlt;
+    const normalizedVenue = toPdfText(row.venue);
+    const venueColumnIndex = columns.findIndex((column) => column.key === "venue");
+    const venueColumnWidth = scaledWidths[venueColumnIndex];
+    const venueMaxWidth = Math.max(10, venueColumnWidth - 8);
+    const venueLines = wrapTextToWidth(normalizedVenue, fontRegular, tableFontSize, venueMaxWidth);
+    const venueLineCount = Math.max(1, venueLines.length);
+    const rowHeight = Math.max(baseRowHeight, 8 + venueLineCount * 10);
+
+    if (cursorY - rowHeight < margin + 18) {
+      page = doc.addPage([842, 595]);
+      cursorY = pageSize.height - margin;
+      drawPageBackground();
+      drawHeader();
+      drawTableHeader();
+    }
+
     page.drawRectangle({
       x: tableX,
       y: cursorY - rowHeight,
@@ -282,24 +342,41 @@ async function buildSchedulePdf(
     let x = tableX + 6;
     (Object.keys(row) as Array<keyof typeof row>).forEach((key, index) => {
       const columnWidth = scaledWidths[index];
-      const rawText = toPdfText(row[key]);
+      const rawText = key === "venue" ? normalizedVenue : toPdfText(row[key]);
       const resolvedFontSize =
         key === "score"
           ? fitTextFontSize(rawText, fontBold, Math.max(10, columnWidth - 8), tableFontSize, tableMinFontSize)
           : fitTextFontSize(rawText, fontRegular, Math.max(10, columnWidth - 8), tableFontSize, tableMinFontSize);
-      const fittedText = clampTextToWidth(
-        rawText,
-        key === "score" ? fontBold : fontRegular,
-        resolvedFontSize,
-        Math.max(10, columnWidth - 8)
-      );
-      page.drawText(fittedText, {
-        x,
-        y: cursorY - 13,
-        size: resolvedFontSize,
-        font: key === "score" ? fontBold : fontRegular,
-        color: key === "status" ? statusColor(match.status) : colors.text,
-      });
+      if (key === "venue") {
+        const lines = wrapTextToWidth(rawText, fontRegular, resolvedFontSize, Math.max(10, columnWidth - 8));
+        lines.forEach((line, lineIndex) => {
+          const textWidth = fontRegular.widthOfTextAtSize(line, resolvedFontSize);
+          const centeredX = x + Math.max(0, (columnWidth - textWidth) / 2);
+          page.drawText(line, {
+            x: centeredX,
+            y: cursorY - 12 - lineIndex * 9,
+            size: resolvedFontSize,
+            font: fontRegular,
+            color: colors.text,
+          });
+        });
+      } else {
+        const fittedText = clampTextToWidth(
+          rawText,
+          key === "score" ? fontBold : fontRegular,
+          resolvedFontSize,
+          Math.max(10, columnWidth - 8)
+        );
+        const textWidth = (key === "score" ? fontBold : fontRegular).widthOfTextAtSize(fittedText, resolvedFontSize);
+        const centeredX = x + Math.max(0, (columnWidth - textWidth) / 2);
+        page.drawText(fittedText, {
+          x: centeredX,
+          y: cursorY - 13,
+          size: resolvedFontSize,
+          font: key === "score" ? fontBold : fontRegular,
+          color: key === "status" ? statusColor(match.status) : colors.text,
+        });
+      }
       x += columnWidth;
     });
 

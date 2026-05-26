@@ -6,6 +6,13 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 
+function TeamBadge({ name, profileImageUrl }: { name: string; profileImageUrl?: string | null }) {
+  if (profileImageUrl) {
+    return <img src={profileImageUrl} alt={name} className="h-4 w-4 rounded-full object-cover" loading="lazy" />;
+  }
+  return <span className="inline-flex h-4 w-4 items-center justify-center text-[10px]">🛡️</span>;
+}
+
 export default function FavoritesPage() {
   const favoritesQuery = useFavorites();
 
@@ -35,7 +42,10 @@ export default function FavoritesPage() {
               {favoritesQuery.data.teams.length ? (
                 favoritesQuery.data.teams.map((team) => (
                   <Link key={team.id} href={`/teams/${team.id}`} className="block rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
-                    {team.name}
+                    <span className="flex items-center gap-2">
+                      <TeamBadge name={team.name} profileImageUrl={team.profileImageUrl} />
+                      <span>{team.name}</span>
+                    </span>
                   </Link>
                 ))
               ) : (

@@ -47,7 +47,9 @@ const competitionListResponse = z.object({
         .array(
           z.object({
             dayLabel: z.string(),
+            dayDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
             generationLabel: z.string().optional(),
+            stageScope: z.enum(["ALL", "GROUP_STAGE", "KNOCKOUT"]).optional(),
             pitchId: z.string().nullable().optional(),
             startTime: z.string(),
             endTime: z.string(),
@@ -96,7 +98,9 @@ const competitionDetailsResponse = z.object({
       .array(
         z.object({
           dayLabel: z.string(),
+          dayDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
           generationLabel: z.string().optional(),
+          stageScope: z.enum(["ALL", "GROUP_STAGE", "KNOCKOUT"]).optional(),
           pitchId: z.string().nullable().optional(),
           startTime: z.string(),
           endTime: z.string(),
@@ -212,7 +216,9 @@ const matchesResponse = z.object({
       homeTeamId: z.string(),
       awayTeamId: z.string(),
       homeTeam: z.string(),
+      homeTeamProfileImageUrl: z.string().nullable().optional(),
       awayTeam: z.string(),
+      awayTeamProfileImageUrl: z.string().nullable().optional(),
       homeScore: z.number().nullable(),
       awayScore: z.number().nullable(),
       liveMinute: z.number().nullable(),
@@ -220,6 +226,7 @@ const matchesResponse = z.object({
       venue: z.string(),
       venueLabel: z.string().nullable().optional(),
       pitchName: z.string().nullable().optional(),
+      isVirtualKnockout: z.boolean().optional(),
     })
   ),
 });
@@ -427,6 +434,9 @@ const competitionDrawResponse = z.object({
                 homeTeam: z.object({ id: z.string(), name: z.string(), profileImageUrl: z.string().nullable().optional() }).nullable(),
                 awayTeam: z.object({ id: z.string(), name: z.string(), profileImageUrl: z.string().nullable().optional() }).nullable(),
                 winnerTeam: z.object({ id: z.string(), name: z.string(), profileImageUrl: z.string().nullable().optional() }).nullable(),
+                scheduledAt: z.string().datetime().nullable().optional(),
+                pitchName: z.string().nullable().optional(),
+                venueLabel: z.string().nullable().optional(),
               })
             ),
           })
@@ -1106,6 +1116,7 @@ export function useGenerateDraw(competitionId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["draw-competitions"] });
       queryClient.invalidateQueries({ queryKey: ["competition-draw", competitionId] });
+      queryClient.invalidateQueries({ queryKey: ["matches"] });
     },
   });
 }
@@ -1124,6 +1135,7 @@ export function useResetDraw(competitionId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["draw-competitions"] });
       queryClient.invalidateQueries({ queryKey: ["competition-draw", competitionId] });
+      queryClient.invalidateQueries({ queryKey: ["matches"] });
     },
   });
 }
@@ -1146,6 +1158,29 @@ export function useSwapDrawTeams(competitionId: string) {
       queryClient.invalidateQueries({ queryKey: ["competition-draw", competitionId] });
       queryClient.invalidateQueries({ queryKey: ["matches"] });
       queryClient.invalidateQueries({ queryKey: ["match-details"] });
+    },
+  });
+}
+
+export function useSwapDrawPitches(competitionId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: { generationYear: number; firstPitchName: string; secondPitchName: string }) => {
+      const response = await fetch(`/api/draws/${competitionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "swapPitches", ...payload }),
+      });
+      const json = await safeReadJson(response);
+      if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to swap draw pitches");
+      return (json as { data: unknown }).data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["competition-draw", competitionId] });
+      queryClient.invalidateQueries({ queryKey: ["matches"] });
+      queryClient.invalidateQueries({ queryKey: ["match-details"] });
+      queryClient.invalidateQueries({ queryKey: ["schedule"] });
     },
   });
 }
@@ -1437,13 +1472,14 @@ export function useNotifications() {
   });
 }
 
-export function useApplicableCompetitions(filters?: { q?: string; type?: CompetitionType | "ALL" }) {
+export function useApplicableCompetitions(filters?: { q?: string; type?: CompetitionType | "ALL"; sport?: SportType | "ALL" }) {
   return useQuery({
     queryKey: ["applicable-competitions", filters],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (filters?.q) params.set("q", filters.q);
       if (filters?.type && filters.type !== "ALL") params.set("type", filters.type);
+      if (filters?.sport && filters.sport !== "ALL") params.set("sport", filters.sport);
       const suffix = params.toString() ? `?${params.toString()}` : "";
       const response = await fetch(`/api/team-applications${suffix}`);
       if (!response.ok) throw new Error("Failed to load applicable competitions");

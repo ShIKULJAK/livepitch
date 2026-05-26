@@ -652,6 +652,9 @@ model DrawKnockoutMatch {
   awayTeam        Team?             @relation("DrawKnockoutAwayTeam", fields: [awayTeamId], references: [id], onDelete: SetNull)
   winnerTeamId    String?
   winnerTeam      Team?             @relation("DrawKnockoutWinnerTeam", fields: [winnerTeamId], references: [id], onDelete: SetNull)
+  scheduledAt     DateTime?
+  pitchName       String?
+  venueLabel      String?
   order           Int
 
   @@index([roundId, order])

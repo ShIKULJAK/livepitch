@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { useCompetitionDraw, useGenerateDraw, useResetDraw, useSwapDrawPitches, useSwapDrawTeams } from "@/hooks/use-competitions";
+import { useCompetition, useCompetitionDraw, useGenerateDraw, useResetDraw, useSwapDrawPitches, useSwapDrawTeams, useUpdateCompetition, useVenues } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { canCreateDraws } from "@/lib/permissions";
+import { GENERATION_LABELS } from "@/lib/constants/generation-presets";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -20,6 +21,16 @@ type DrawMatch = {
   awayTeam: DrawTeam | null;
   homeSourceValue: string;
   awaySourceValue: string;
+};
+const ALL_GENERATIONS_LABEL = "Sve generacije";
+type ScheduleDayRow = {
+  dayLabel: string;
+  dayDate: string;
+  generationLabel: string;
+  stageScope?: "ALL" | "GROUP_STAGE" | "KNOCKOUT";
+  pitchId?: string | null;
+  startTime: string;
+  endTime: string;
 };
 
 function TeamMark({ name, imageUrl }: { name: string; imageUrl?: string | null }) {
@@ -39,6 +50,9 @@ export default function CompetitionDrawPage() {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [swapSuccess, setSwapSuccess] = useState<string | null>(null);
   const drawQuery = useCompetitionDraw(params.competitionId, selectedGenerationYear);
+  const competitionDetailsQuery = useCompetition(params.competitionId);
+  const venuesQuery = useVenues();
+  const updateCompetition = useUpdateCompetition(params.competitionId);
   const generateDraw = useGenerateDraw(params.competitionId);
   const resetDraw = useResetDraw(params.competitionId);
   const swapDrawTeams = useSwapDrawTeams(params.competitionId);
@@ -55,8 +69,41 @@ export default function CompetitionDrawPage() {
   const [swapSecondTeamId, setSwapSecondTeamId] = useState("");
   const [swapFirstPitchName, setSwapFirstPitchName] = useState("");
   const [swapSecondPitchName, setSwapSecondPitchName] = useState("");
+  const [scheduleDaysDraft, setScheduleDaysDraft] = useState<ScheduleDayRow[]>([]);
+  const [scheduleSaved, setScheduleSaved] = useState<string | null>(null);
   const generationYears = drawQuery.data?.competition.availableGenerationYears ?? [];
   const activeGeneration = drawQuery.data?.competition.selectedGenerationYear ?? generationYears[0] ?? null;
+  const scheduleGenerationOptions = [ALL_GENERATIONS_LABEL, ...GENERATION_LABELS];
+  const scheduleDays = scheduleDaysDraft.length
+    ? scheduleDaysDraft
+    : ((competitionDetailsQuery.data?.scheduleDays as ScheduleDayRow[] | null) ?? [
+        {
+          dayLabel: "Dan 1",
+          dayDate: new Date().toISOString().slice(0, 10),
+          generationLabel: ALL_GENERATIONS_LABEL,
+          stageScope: "ALL",
+          pitchId: null,
+          startTime: "09:00",
+          endTime: "19:00",
+        },
+      ]).map((day) => ({
+        ...day,
+        dayDate: day.dayDate ?? new Date().toISOString().slice(0, 10),
+        dayLabel: day.dayLabel || day.dayDate || "Dan 1",
+        generationLabel: day.generationLabel || ALL_GENERATIONS_LABEL,
+        stageScope: day.stageScope ?? "ALL",
+      }));
+  const allPitchOptions = useMemo(
+    () =>
+      (venuesQuery.data ?? []).flatMap((venue) =>
+        venue.pitches.map((pitch) => ({
+          id: pitch.id,
+          generationLabel: pitch.generationLabel,
+          label: `${venue.name} - ${pitch.name} (${pitch.fieldLengthMeters}x${pitch.fieldWidthMeters} m, ${pitch.playerFormat})`,
+        }))
+      ),
+    [venuesQuery.data]
+  );
 
   useEffect(() => {
     if (selectedGenerationYear == null && activeGeneration != null) {
@@ -70,6 +117,17 @@ export default function CompetitionDrawPage() {
     const timeout = window.setTimeout(() => setIsGenerationSwitching(false), 220);
     return () => window.clearTimeout(timeout);
   }, [selectedGenerationYear]);
+  useEffect(() => {
+    if (!competitionDetailsQuery.data?.scheduleDays) return;
+    const mapped = (competitionDetailsQuery.data.scheduleDays as ScheduleDayRow[]).map((day) => ({
+      ...day,
+      dayDate: day.dayDate ?? new Date().toISOString().slice(0, 10),
+      dayLabel: day.dayLabel || day.dayDate || "Dan 1",
+      generationLabel: day.generationLabel || ALL_GENERATIONS_LABEL,
+      stageScope: day.stageScope ?? "ALL",
+    }));
+    setScheduleDaysDraft(mapped);
+  }, [competitionDetailsQuery.data?.scheduleDays]);
 
   if (drawQuery.isLoading) {
     return (
@@ -98,6 +156,7 @@ export default function CompetitionDrawPage() {
   async function onGenerate() {
     setGenerateError(null);
     setSwapSuccess(null);
+    setScheduleSaved(null);
     try {
       await generateDraw.mutateAsync({ ...currentConfig });
     } catch (error) {
@@ -108,6 +167,7 @@ export default function CompetitionDrawPage() {
   async function onGenerateSelectedGeneration() {
     setGenerateError(null);
     setSwapSuccess(null);
+    setScheduleSaved(null);
     if (!selectedGenerationYear) {
       setGenerateError("Nije odabrana generacija.");
       return;
@@ -122,6 +182,7 @@ export default function CompetitionDrawPage() {
   async function onResetSelectedGeneration() {
     setGenerateError(null);
     setSwapSuccess(null);
+    setScheduleSaved(null);
     if (!selectedGenerationYear) {
       setGenerateError("Nije odabrana generacija.");
       return;
@@ -184,6 +245,27 @@ export default function CompetitionDrawPage() {
       setSwapSuccess("Zamjena terena je sačuvana i raspored je ažuriran.");
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Greška pri zamjeni terena.");
+    }
+  }
+  async function onSaveScheduleDays() {
+    setGenerateError(null);
+    setSwapSuccess(null);
+    setScheduleSaved(null);
+    try {
+      await updateCompetition.mutateAsync({
+        scheduleDays: scheduleDays.map((day) => ({
+          dayLabel: day.dayLabel || day.dayDate || "Dan 1",
+          dayDate: day.dayDate,
+          generationLabel: day.generationLabel,
+          stageScope: day.stageScope ?? "ALL",
+          pitchId: day.pitchId ?? null,
+          startTime: day.startTime,
+          endTime: day.endTime,
+        })),
+      });
+      setScheduleSaved("Dani i satnica su sačuvani.");
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : "Greška pri čuvanju dana i satnice.");
     }
   }
 
@@ -492,6 +574,163 @@ export default function CompetitionDrawPage() {
             {swapSuccess ? (
               <div className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--primary)", color: "var(--primary)" }}>
                 {swapSuccess}
+              </div>
+            ) : null}
+          </Card>
+          <Card className="space-y-3 p-5">
+            <h3 className="text-lg font-semibold">Dani i satnica</h3>
+            <div className="space-y-2">
+              {scheduleDays.map((day, index) => (
+                <div key={`${index}-${day.dayDate}-${day.generationLabel}-${day.stageScope ?? "ALL"}`} className="grid gap-2 md:grid-cols-[1fr_220px_160px_1fr_130px_130px_auto]">
+                  <Input
+                    type="date"
+                    value={day.dayDate}
+                    onChange={(event) => {
+                      const next = [...scheduleDays];
+                      next[index] = { ...next[index], dayDate: event.currentTarget.value, dayLabel: event.currentTarget.value };
+                      setScheduleDaysDraft(next);
+                    }}
+                  />
+                  <Select
+                    value={day.generationLabel}
+                    onChange={(event) => {
+                      const next = [...scheduleDays];
+                      const generationLabel = event.currentTarget.value;
+                      const compatiblePitch = allPitchOptions.find((pitch) => pitch.generationLabel === generationLabel);
+                      next[index] = { ...next[index], generationLabel, pitchId: compatiblePitch?.id ?? next[index].pitchId ?? null };
+                      setScheduleDaysDraft(next);
+                    }}
+                  >
+                    {scheduleGenerationOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </Select>
+                  <Select
+                    value={day.stageScope ?? "ALL"}
+                    onChange={(event) => {
+                      const next = [...scheduleDays];
+                      next[index] = {
+                        ...next[index],
+                        stageScope: event.currentTarget.value as "ALL" | "GROUP_STAGE" | "KNOCKOUT",
+                      };
+                      setScheduleDaysDraft(next);
+                    }}
+                  >
+                    <option value="ALL">Sve faze</option>
+                    <option value="GROUP_STAGE">Grupna faza</option>
+                    <option value="KNOCKOUT">Knockout</option>
+                  </Select>
+                  <Select
+                    value={day.pitchId ?? ""}
+                    disabled={day.generationLabel === ALL_GENERATIONS_LABEL && (day.stageScope ?? "ALL") === "ALL"}
+                    onChange={(event) => {
+                      const next = [...scheduleDays];
+                      next[index] = { ...next[index], pitchId: event.currentTarget.value || null };
+                      setScheduleDaysDraft(next);
+                    }}
+                  >
+                    <option value="">
+                      {day.generationLabel === ALL_GENERATIONS_LABEL && (day.stageScope ?? "ALL") === "ALL"
+                        ? "Automatski (FIFA pravilo)"
+                        : "Izaberi teren"}
+                    </option>
+                    {allPitchOptions
+                      .slice()
+                      .sort((a, b) => {
+                        const aMatch = a.generationLabel === day.generationLabel ? 0 : 1;
+                        const bMatch = b.generationLabel === day.generationLabel ? 0 : 1;
+                        if (aMatch !== bMatch) return aMatch - bMatch;
+                        return a.label.localeCompare(b.label);
+                      })
+                      .map((pitch) => (
+                        <option key={pitch.id} value={pitch.id}>
+                          {pitch.label}
+                        </option>
+                      ))}
+                  </Select>
+                  {day.generationLabel === ALL_GENERATIONS_LABEL && (day.stageScope ?? "ALL") === "ALL" ? (
+                    <span
+                      className="inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                      style={{ borderColor: "var(--primary)", color: "var(--primary)" }}
+                    >
+                      AUTO
+                    </span>
+                  ) : null}
+                  <Input
+                    type="time"
+                    value={day.startTime}
+                    onChange={(event) => {
+                      const next = [...scheduleDays];
+                      next[index] = { ...next[index], startTime: event.currentTarget.value };
+                      setScheduleDaysDraft(next);
+                    }}
+                  />
+                  <Input
+                    type="time"
+                    value={day.endTime}
+                    onChange={(event) => {
+                      const next = [...scheduleDays];
+                      next[index] = { ...next[index], endTime: event.currentTarget.value };
+                      setScheduleDaysDraft(next);
+                    }}
+                  />
+                  {scheduleDays.length > 1 ? (
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        const next = scheduleDays.filter((_, itemIndex) => itemIndex !== index);
+                        setScheduleDaysDraft(
+                          next.length
+                            ? next
+                            : [
+                                {
+                                  dayLabel: "Dan 1",
+                                  dayDate: new Date().toISOString().slice(0, 10),
+                                  generationLabel: ALL_GENERATIONS_LABEL,
+                                  stageScope: "ALL",
+                                  pitchId: null,
+                                  startTime: "09:00",
+                                  endTime: "19:00",
+                                },
+                              ]
+                        );
+                      }}
+                    >
+                      -
+                    </Button>
+                  ) : null}
+                </div>
+              ))}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  onClick={() =>
+                    setScheduleDaysDraft([
+                      ...scheduleDays,
+                      {
+                        dayLabel: `Dan ${scheduleDays.length + 1}`,
+                        dayDate: new Date().toISOString().slice(0, 10),
+                        generationLabel: ALL_GENERATIONS_LABEL,
+                        stageScope: "ALL",
+                        pitchId: null,
+                        startTime: "09:00",
+                        endTime: "19:00",
+                      },
+                    ])
+                  }
+                >
+                  Dodaj dan
+                </Button>
+                <Button type="button" variant="primary" onClick={() => void onSaveScheduleDays()} disabled={updateCompetition.isPending}>
+                  {updateCompetition.isPending ? "Čuvanje..." : "Sačuvaj dane i satnicu"}
+                </Button>
+              </div>
+            </div>
+            {scheduleSaved ? (
+              <div className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--primary)", color: "var(--primary)" }}>
+                {scheduleSaved}
               </div>
             ) : null}
           </Card>

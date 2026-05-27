@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useCompetition, useCompetitionDraw, useGenerateDraw, useResetDraw, useSwapDrawPitches, useSwapDrawTeams, useUpdateCompetition, useVenues } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { canCreateDraws } from "@/lib/permissions";
-import { GENERATION_LABELS } from "@/lib/constants/generation-presets";
+import { GENERATION_LABELS, getGenerationPreset } from "@/lib/constants/generation-presets";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -32,6 +32,19 @@ type ScheduleDayRow = {
   startTime: string;
   endTime: string;
 };
+
+function resolveGenerationProfile(generationLabel: string) {
+  const year = Number(generationLabel.replace("Generacija ", ""));
+  if (Number.isFinite(year)) {
+    if (year >= 2018 && year <= 2021) return { playerFormat: "5+1", fieldLengthMeters: 45, fieldWidthMeters: 25, goalWidthMeters: 5, goalHeightMeters: 2 };
+    if (year >= 2016 && year <= 2017) return { playerFormat: "6+1", fieldLengthMeters: 60, fieldWidthMeters: 40, goalWidthMeters: 5, goalHeightMeters: 2 };
+    if (year >= 2014 && year <= 2015) return { playerFormat: "8+1", fieldLengthMeters: 70, fieldWidthMeters: 50, goalWidthMeters: 5, goalHeightMeters: 2 };
+    if (year >= 2011 && year <= 2013) return { playerFormat: "10+1", fieldLengthMeters: 82, fieldWidthMeters: 50, goalWidthMeters: 6.4, goalHeightMeters: 2.13 };
+  }
+  const preset = getGenerationPreset(generationLabel);
+  if (!preset) return null;
+  return preset;
+}
 
 function TeamMark({ name, imageUrl }: { name: string; imageUrl?: string | null }) {
   if (imageUrl) {
@@ -71,15 +84,22 @@ export default function CompetitionDrawPage() {
   const [swapSecondPitchName, setSwapSecondPitchName] = useState("");
   const [scheduleDaysDraft, setScheduleDaysDraft] = useState<ScheduleDayRow[]>([]);
   const [scheduleSaved, setScheduleSaved] = useState<string | null>(null);
+  const [scheduleSavedVisible, setScheduleSavedVisible] = useState(false);
+  const [generateErrorVisible, setGenerateErrorVisible] = useState(false);
+  const [swapSuccessVisible, setSwapSuccessVisible] = useState(false);
+  const [hideDiagnosticsAfterReset, setHideDiagnosticsAfterReset] = useState(false);
   const generationYears = drawQuery.data?.competition.availableGenerationYears ?? [];
   const activeGeneration = drawQuery.data?.competition.selectedGenerationYear ?? generationYears[0] ?? null;
   const scheduleGenerationOptions = [ALL_GENERATIONS_LABEL, ...GENERATION_LABELS];
+  const defaultTournamentDay = competitionDetailsQuery.data?.startDate
+    ? new Date(competitionDetailsQuery.data.startDate).toISOString().slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
   const scheduleDays = scheduleDaysDraft.length
     ? scheduleDaysDraft
     : ((competitionDetailsQuery.data?.scheduleDays as ScheduleDayRow[] | null) ?? [
         {
           dayLabel: "Dan 1",
-          dayDate: new Date().toISOString().slice(0, 10),
+          dayDate: defaultTournamentDay,
           generationLabel: ALL_GENERATIONS_LABEL,
           stageScope: "ALL",
           pitchId: null,
@@ -88,7 +108,7 @@ export default function CompetitionDrawPage() {
         },
       ]).map((day) => ({
         ...day,
-        dayDate: day.dayDate ?? new Date().toISOString().slice(0, 10),
+        dayDate: day.dayDate ?? defaultTournamentDay,
         dayLabel: day.dayLabel || day.dayDate || "Dan 1",
         generationLabel: day.generationLabel || ALL_GENERATIONS_LABEL,
         stageScope: day.stageScope ?? "ALL",
@@ -98,12 +118,139 @@ export default function CompetitionDrawPage() {
       (venuesQuery.data ?? []).flatMap((venue) =>
         venue.pitches.map((pitch) => ({
           id: pitch.id,
+          venueName: venue.name,
+          pitchName: pitch.name,
           generationLabel: pitch.generationLabel,
+          playerFormat: pitch.playerFormat,
+          fieldLengthMeters: pitch.fieldLengthMeters,
+          fieldWidthMeters: pitch.fieldWidthMeters,
+          goalWidthMeters: pitch.goalWidthMeters,
+          goalHeightMeters: pitch.goalHeightMeters,
           label: `${venue.name} - ${pitch.name} (${pitch.fieldLengthMeters}x${pitch.fieldWidthMeters} m, ${pitch.playerFormat})`,
         }))
       ),
     [venuesQuery.data]
   );
+  const configuredPitchValues = useMemo(
+    () => (competitionDetailsQuery.data?.pitchNames ?? []).map((value) => value.trim()).filter(Boolean),
+    [competitionDetailsQuery.data?.pitchNames]
+  );
+  const configuredPitchLeafSet = useMemo(
+    () =>
+      new Set(
+        configuredPitchValues.map((value) => {
+          const parts = value.split(" - ").map((part) => part.trim()).filter(Boolean);
+          return parts.length ? parts[parts.length - 1] : value;
+        })
+      ),
+    [configuredPitchValues]
+  );
+  const configuredPitchSet = useMemo(() => new Set(configuredPitchValues), [configuredPitchValues]);
+  const eligiblePitchOptions = useMemo(() => {
+    if (!allPitchOptions.length) return [];
+    if (!configuredPitchValues.length) return allPitchOptions;
+    return allPitchOptions.filter((item) => {
+      const venuePitch = `${item.venueName} - ${item.pitchName}`;
+      return configuredPitchSet.has(venuePitch) || configuredPitchSet.has(item.pitchName) || configuredPitchLeafSet.has(item.pitchName);
+    });
+  }, [allPitchOptions, configuredPitchLeafSet, configuredPitchSet, configuredPitchValues.length]);
+  const displayedScheduleDays = useMemo(() => {
+    const baseDate =
+      scheduleDays.find((day) => day.dayDate)?.dayDate ??
+      (competitionDetailsQuery.data?.startDate ? new Date(competitionDetailsQuery.data.startDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
+    return scheduleDays.map((row) => ({
+      ...row,
+      dayDate: row.dayDate ?? baseDate,
+      stageScope: row.stageScope ?? "ALL",
+    }));
+  }, [competitionDetailsQuery.data?.startDate, eligiblePitchOptions, scheduleDays]);
+  const autoDrawDiagnostics = useMemo(() => {
+    const pitchNameById = new Map(
+      allPitchOptions.map((item) => [item.id, item.label])
+    );
+    const configuredGenerationLabels = Array.from(
+      new Set(
+        displayedScheduleDays
+          .map((day) => day.generationLabel)
+          .filter((label): label is string => Boolean(label && label !== ALL_GENERATIONS_LABEL))
+      )
+    ).sort((a, b) => {
+      const ay = Number(a.replace("Generacija ", ""));
+      const by = Number(b.replace("Generacija ", ""));
+      if (Number.isFinite(ay) && Number.isFinite(by)) return by - ay;
+      return a.localeCompare(b);
+    });
+
+    return configuredGenerationLabels
+      .map((label) => {
+        const year = Number(label.replace("Generacija ", ""));
+        const applicableDays = displayedScheduleDays.filter((day) => day.generationLabel === label || day.generationLabel === ALL_GENERATIONS_LABEL);
+        const groupDays = applicableDays.filter(
+          (day) => (day.stageScope ?? "ALL") === "ALL" || (day.stageScope ?? "ALL") === "GROUP_STAGE"
+        );
+        const knockoutDays = applicableDays.filter(
+          (day) => (day.stageScope ?? "ALL") === "ALL" || (day.stageScope ?? "ALL") === "KNOCKOUT"
+        );
+        const resolvedPitchLabels = new Set<string>();
+        for (const day of applicableDays) {
+          if (day.pitchId && pitchNameById.has(day.pitchId)) {
+            resolvedPitchLabels.add(pitchNameById.get(day.pitchId)!);
+          } else {
+            resolvedPitchLabels.add("AUTO (FIFA kompatibilan teren iz stadiona turnira)");
+          }
+        }
+        const nearestMismatches = (() => {
+          const preset = resolveGenerationProfile(label);
+          if (!preset) return [];
+          const candidates = eligiblePitchOptions
+            .map((pitch) => {
+              const problems: string[] = [];
+              if ((pitch.playerFormat ?? "").trim() !== preset.playerFormat) {
+                problems.push(`format ${pitch.playerFormat ?? "N/A"} != ${preset.playerFormat}`);
+              }
+              if (pitch.fieldLengthMeters !== preset.fieldLengthMeters || pitch.fieldWidthMeters !== preset.fieldWidthMeters) {
+                problems.push(
+                  `teren ${pitch.fieldLengthMeters}x${pitch.fieldWidthMeters} != ${preset.fieldLengthMeters}x${preset.fieldWidthMeters}`
+                );
+              }
+              if (pitch.goalWidthMeters != null && pitch.goalHeightMeters != null && (
+                pitch.goalWidthMeters !== preset.goalWidthMeters ||
+                pitch.goalHeightMeters !== preset.goalHeightMeters
+              )) {
+                problems.push(
+                  `gol ${pitch.goalWidthMeters ?? "?"}x${pitch.goalHeightMeters ?? "?"} != ${preset.goalWidthMeters}x${preset.goalHeightMeters}`
+                );
+              }
+              return {
+                label: pitch.label,
+                problems,
+              };
+            })
+            .filter((item) => item.problems.length > 0)
+            .sort((a, b) => a.problems.length - b.problems.length || a.label.localeCompare(b.label))
+            .slice(0, 3)
+            .map((item) => `${item.label} [${item.problems.join("; ")}]`);
+          return candidates;
+        })();
+        return {
+          year,
+          label,
+          groupSlots: groupDays.length,
+          knockoutSlots: knockoutDays.length,
+          pitchLabels: Array.from(resolvedPitchLabels),
+          missingReason:
+            !resolvedPitchLabels.size
+              ? (() => {
+                  const preset = resolveGenerationProfile(label);
+                  if (!preset) return "Nema definisanog FIFA preset pravila za ovu generaciju.";
+                  const goalRule = `, gol ${preset.goalWidthMeters}x${preset.goalHeightMeters}m`;
+                  return `Nema kompatibilnog terena (${preset.playerFormat}, ${preset.fieldLengthMeters}x${preset.fieldWidthMeters}m${goalRule}) u izabranim stadionima turnira.`;
+                })()
+              : null,
+          nearestMismatches,
+        };
+      });
+  }, [allPitchOptions, displayedScheduleDays, eligiblePitchOptions]);
 
   useEffect(() => {
     if (selectedGenerationYear == null && activeGeneration != null) {
@@ -121,13 +268,44 @@ export default function CompetitionDrawPage() {
     if (!competitionDetailsQuery.data?.scheduleDays) return;
     const mapped = (competitionDetailsQuery.data.scheduleDays as ScheduleDayRow[]).map((day) => ({
       ...day,
-      dayDate: day.dayDate ?? new Date().toISOString().slice(0, 10),
+      dayDate: day.dayDate ?? defaultTournamentDay,
       dayLabel: day.dayLabel || day.dayDate || "Dan 1",
       generationLabel: day.generationLabel || ALL_GENERATIONS_LABEL,
       stageScope: day.stageScope ?? "ALL",
     }));
     setScheduleDaysDraft(mapped);
-  }, [competitionDetailsQuery.data?.scheduleDays]);
+    setHideDiagnosticsAfterReset(false);
+  }, [competitionDetailsQuery.data?.scheduleDays, defaultTournamentDay]);
+  useEffect(() => {
+    if (!scheduleSaved) return;
+    setScheduleSavedVisible(true);
+    const fade = window.setTimeout(() => setScheduleSavedVisible(false), 2200);
+    const clear = window.setTimeout(() => setScheduleSaved(null), 2600);
+    return () => {
+      window.clearTimeout(fade);
+      window.clearTimeout(clear);
+    };
+  }, [scheduleSaved]);
+  useEffect(() => {
+    if (!generateError) return;
+    setGenerateErrorVisible(true);
+    const fade = window.setTimeout(() => setGenerateErrorVisible(false), 2200);
+    const clear = window.setTimeout(() => setGenerateError(null), 2600);
+    return () => {
+      window.clearTimeout(fade);
+      window.clearTimeout(clear);
+    };
+  }, [generateError]);
+  useEffect(() => {
+    if (!swapSuccess) return;
+    setSwapSuccessVisible(true);
+    const fade = window.setTimeout(() => setSwapSuccessVisible(false), 2200);
+    const clear = window.setTimeout(() => setSwapSuccess(null), 2600);
+    return () => {
+      window.clearTimeout(fade);
+      window.clearTimeout(clear);
+    };
+  }, [swapSuccess]);
 
   if (drawQuery.isLoading) {
     return (
@@ -159,6 +337,8 @@ export default function CompetitionDrawPage() {
     setScheduleSaved(null);
     try {
       await generateDraw.mutateAsync({ ...currentConfig });
+      setScheduleDaysDraft([]);
+      await competitionDetailsQuery.refetch();
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Greška pri kreiranju izvlačenja.");
     }
@@ -174,6 +354,8 @@ export default function CompetitionDrawPage() {
     }
     try {
       await generateDraw.mutateAsync({ ...currentConfig, generationYear: selectedGenerationYear });
+      setScheduleDaysDraft([]);
+      await competitionDetailsQuery.refetch();
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Greška pri kreiranju izvlačenja.");
     }
@@ -188,8 +370,44 @@ export default function CompetitionDrawPage() {
       return;
     }
     try {
-      await resetDraw.mutateAsync(selectedGenerationYear);
+      await resetDraw.mutateAsync({ generationYear: selectedGenerationYear });
+      setScheduleDaysDraft([]);
+      await Promise.all([drawQuery.refetch(), competitionDetailsQuery.refetch()]);
+      setSwapSuccess(`Resetovan žrijeb za generaciju ${selectedGenerationYear}.`);
     } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : "Greška pri resetu izvlačenja.");
+    }
+  }
+  async function onResetAllDraw() {
+    setGenerateError(null);
+    setSwapSuccess(null);
+    setScheduleSaved(null);
+    setHideDiagnosticsAfterReset(true);
+    try {
+      await resetDraw.mutateAsync({});
+      setScheduleDaysDraft([]);
+      setSelectedGenerationYear(null);
+      await Promise.all([drawQuery.refetch(), competitionDetailsQuery.refetch()]);
+      setSwapSuccess("Resetovan kompletan žrijeb.");
+    } catch (error) {
+      setHideDiagnosticsAfterReset(false);
+      setGenerateError(error instanceof Error ? error.message : "Greška pri resetu izvlačenja.");
+    }
+  }
+
+  async function onResetAllDrawAndSchedule() {
+    setGenerateError(null);
+    setSwapSuccess(null);
+    setScheduleSaved(null);
+    setHideDiagnosticsAfterReset(true);
+    try {
+      await resetDraw.mutateAsync({ resetSchedule: true });
+      setScheduleDaysDraft([]);
+      setSelectedGenerationYear(null);
+      await Promise.all([drawQuery.refetch(), competitionDetailsQuery.refetch()]);
+      setSwapSuccess("Resetovan kompletan žrijeb i dani/satnica.");
+    } catch (error) {
+      setHideDiagnosticsAfterReset(false);
       setGenerateError(error instanceof Error ? error.message : "Greška pri resetu izvlačenja.");
     }
   }
@@ -252,8 +470,12 @@ export default function CompetitionDrawPage() {
     setSwapSuccess(null);
     setScheduleSaved(null);
     try {
+      const sourceDays =
+        scheduleDaysDraft.length > 0
+          ? scheduleDaysDraft
+          : ((competitionDetailsQuery.data?.scheduleDays as ScheduleDayRow[] | null) ?? displayedScheduleDays);
       await updateCompetition.mutateAsync({
-        scheduleDays: scheduleDays.map((day) => ({
+        scheduleDays: sourceDays.map((day) => ({
           dayLabel: day.dayLabel || day.dayDate || "Dan 1",
           dayDate: day.dayDate,
           generationLabel: day.generationLabel,
@@ -552,7 +774,10 @@ export default function CompetitionDrawPage() {
                   >
                     {resetDraw.isPending ? "Resetting..." : `Reset draw (${selectedGenerationYear ?? "-"})`}
                   </Button>
-                  <Button variant="danger" onClick={() => resetDraw.mutate(undefined)} disabled={resetDraw.isPending}>{resetDraw.isPending ? "Resetting..." : "Reset Draw (sve)"}</Button>
+                  <Button variant="danger" onClick={() => void onResetAllDraw()} disabled={resetDraw.isPending}>{resetDraw.isPending ? "Resetting..." : "Reset Draw (sve)"}</Button>
+                  <Button variant="danger" onClick={() => void onResetAllDrawAndSchedule()} disabled={resetDraw.isPending}>
+                    {resetDraw.isPending ? "Resetting..." : "Reset Draw + satnica"}
+                  </Button>
                   <Button
                     variant="secondary"
                     onClick={() => void onGenerateSelectedGeneration()}
@@ -567,12 +792,37 @@ export default function CompetitionDrawPage() {
               ) : <p className="text-sm" style={{ color: "var(--text-secondary)" }}>Read-only access.</p>}
             </div>
             {generateError ? (
-              <div className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--danger)", color: "var(--danger)" }}>
+              <div
+                className="rounded-lg border p-3 text-sm transition-opacity duration-300"
+                style={{ borderColor: "var(--danger)", color: "var(--danger)", opacity: generateErrorVisible ? 1 : 0 }}
+              >
                 {generateError}
               </div>
             ) : null}
+            {!generateError && generationYears.length && !hideDiagnosticsAfterReset ? (
+              <div className="rounded-lg border p-3 text-xs" style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}>
+                <p className="mb-2 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                  Dijagnostika prije kreiranja zrijeba
+                </p>
+                <div className="space-y-1">
+                  {autoDrawDiagnostics.map((item) => (
+                    <p key={`diag-${item.year}`}>
+                      {item.label}: grupni slotovi {item.groupSlots}, knockout slotovi {item.knockoutSlots}, tereni:{" "}
+                      {item.pitchLabels.join(" | ")}
+                      {item.missingReason ? ` | razlog: ${item.missingReason}` : ""}
+                      {item.missingReason && item.nearestMismatches.length
+                        ? ` | najbliži tereni: ${item.nearestMismatches.join(" | ")}`
+                        : ""}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             {swapSuccess ? (
-              <div className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--primary)", color: "var(--primary)" }}>
+              <div
+                className="rounded-lg border p-3 text-sm transition-opacity duration-300"
+                style={{ borderColor: "var(--primary)", color: "var(--primary)", opacity: swapSuccessVisible ? 1 : 0 }}
+              >
                 {swapSuccess}
               </div>
             ) : null}
@@ -580,27 +830,43 @@ export default function CompetitionDrawPage() {
           <Card className="space-y-3 p-5">
             <h3 className="text-lg font-semibold">Dani i satnica</h3>
             <div className="space-y-2">
-              {scheduleDays.map((day, index) => (
+              {displayedScheduleDays.map((day, index) => (
                 <div key={`${index}-${day.dayDate}-${day.generationLabel}-${day.stageScope ?? "ALL"}`} className="grid gap-2 md:grid-cols-[1fr_220px_160px_1fr_130px_130px_auto]">
                   <Input
                     type="date"
                     value={day.dayDate}
                     onChange={(event) => {
-                      const next = [...scheduleDays];
+                      const next = [...displayedScheduleDays];
                       next[index] = { ...next[index], dayDate: event.currentTarget.value, dayLabel: event.currentTarget.value };
                       setScheduleDaysDraft(next);
                     }}
                   />
-                  <Select
-                    value={day.generationLabel}
-                    onChange={(event) => {
-                      const next = [...scheduleDays];
-                      const generationLabel = event.currentTarget.value;
-                      const compatiblePitch = allPitchOptions.find((pitch) => pitch.generationLabel === generationLabel);
-                      next[index] = { ...next[index], generationLabel, pitchId: compatiblePitch?.id ?? next[index].pitchId ?? null };
-                      setScheduleDaysDraft(next);
-                    }}
-                  >
+                    <Select
+                      value={day.generationLabel}
+                      onChange={(event) => {
+                        const generationLabel = event.currentTarget.value;
+                        const next = [...displayedScheduleDays];
+                        if (generationLabel === ALL_GENERATIONS_LABEL) {
+                          const row = next[index];
+                          const expanded = GENERATION_LABELS.map((label) => {
+                            const compatiblePitch =
+                              eligiblePitchOptions.find((pitch) => pitch.generationLabel === label) ?? eligiblePitchOptions[0];
+                            return {
+                              ...row,
+                              generationLabel: label,
+                              pitchId: compatiblePitch?.id ?? row.pitchId ?? null,
+                            };
+                          });
+                          next.splice(index, 1, ...expanded);
+                          setScheduleDaysDraft(next);
+                          return;
+                        }
+                        const compatiblePitch =
+                          eligiblePitchOptions.find((pitch) => pitch.generationLabel === generationLabel) ?? eligiblePitchOptions[0];
+                        next[index] = { ...next[index], generationLabel, pitchId: compatiblePitch?.id ?? next[index].pitchId ?? null };
+                        setScheduleDaysDraft(next);
+                      }}
+                    >
                     {scheduleGenerationOptions.map((option) => (
                       <option key={option} value={option}>
                         {option}
@@ -610,7 +876,7 @@ export default function CompetitionDrawPage() {
                   <Select
                     value={day.stageScope ?? "ALL"}
                     onChange={(event) => {
-                      const next = [...scheduleDays];
+                      const next = [...displayedScheduleDays];
                       next[index] = {
                         ...next[index],
                         stageScope: event.currentTarget.value as "ALL" | "GROUP_STAGE" | "KNOCKOUT",
@@ -624,19 +890,16 @@ export default function CompetitionDrawPage() {
                   </Select>
                   <Select
                     value={day.pitchId ?? ""}
-                    disabled={day.generationLabel === ALL_GENERATIONS_LABEL && (day.stageScope ?? "ALL") === "ALL"}
                     onChange={(event) => {
-                      const next = [...scheduleDays];
+                      const next = [...displayedScheduleDays];
                       next[index] = { ...next[index], pitchId: event.currentTarget.value || null };
                       setScheduleDaysDraft(next);
                     }}
                   >
                     <option value="">
-                      {day.generationLabel === ALL_GENERATIONS_LABEL && (day.stageScope ?? "ALL") === "ALL"
-                        ? "Automatski (FIFA pravilo)"
-                        : "Izaberi teren"}
+                      Automatski (svi selektovani tereni turnira)
                     </option>
-                    {allPitchOptions
+                      {eligiblePitchOptions
                       .slice()
                       .sort((a, b) => {
                         const aMatch = a.generationLabel === day.generationLabel ? 0 : 1;
@@ -662,7 +925,7 @@ export default function CompetitionDrawPage() {
                     type="time"
                     value={day.startTime}
                     onChange={(event) => {
-                      const next = [...scheduleDays];
+                      const next = [...displayedScheduleDays];
                       next[index] = { ...next[index], startTime: event.currentTarget.value };
                       setScheduleDaysDraft(next);
                     }}
@@ -671,23 +934,23 @@ export default function CompetitionDrawPage() {
                     type="time"
                     value={day.endTime}
                     onChange={(event) => {
-                      const next = [...scheduleDays];
+                      const next = [...displayedScheduleDays];
                       next[index] = { ...next[index], endTime: event.currentTarget.value };
                       setScheduleDaysDraft(next);
                     }}
                   />
-                  {scheduleDays.length > 1 ? (
+                  {displayedScheduleDays.length > 1 ? (
                     <Button
                       type="button"
                       onClick={() => {
-                        const next = scheduleDays.filter((_, itemIndex) => itemIndex !== index);
+                        const next = displayedScheduleDays.filter((_, itemIndex) => itemIndex !== index);
                         setScheduleDaysDraft(
                           next.length
                             ? next
                             : [
                                 {
                                   dayLabel: "Dan 1",
-                                  dayDate: new Date().toISOString().slice(0, 10),
+                                  dayDate: defaultTournamentDay,
                                   generationLabel: ALL_GENERATIONS_LABEL,
                                   stageScope: "ALL",
                                   pitchId: null,
@@ -708,10 +971,10 @@ export default function CompetitionDrawPage() {
                   type="button"
                   onClick={() =>
                     setScheduleDaysDraft([
-                      ...scheduleDays,
+                      ...displayedScheduleDays,
                       {
-                        dayLabel: `Dan ${scheduleDays.length + 1}`,
-                        dayDate: new Date().toISOString().slice(0, 10),
+                        dayLabel: `Dan ${displayedScheduleDays.length + 1}`,
+                        dayDate: defaultTournamentDay,
                         generationLabel: ALL_GENERATIONS_LABEL,
                         stageScope: "ALL",
                         pitchId: null,
@@ -729,7 +992,10 @@ export default function CompetitionDrawPage() {
               </div>
             </div>
             {scheduleSaved ? (
-              <div className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--primary)", color: "var(--primary)" }}>
+              <div
+                className="rounded-lg border p-3 text-sm transition-opacity duration-300"
+                style={{ borderColor: "var(--primary)", color: "var(--primary)", opacity: scheduleSavedVisible ? 1 : 0 }}
+              >
                 {scheduleSaved}
               </div>
             ) : null}

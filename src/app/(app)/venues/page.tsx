@@ -80,6 +80,8 @@ export default function VenuesPage() {
       playerFormat: preset.playerFormat,
       fieldLengthMeters: String(preset.fieldLengthMeters),
       fieldWidthMeters: String(preset.fieldWidthMeters),
+      goalWidthMeters: String(preset.goalWidthMeters),
+      goalHeightMeters: String(preset.goalHeightMeters),
     }));
   }
 

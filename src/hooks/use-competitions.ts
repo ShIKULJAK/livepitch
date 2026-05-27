@@ -1066,11 +1066,14 @@ export function useDeleteMatch() {
   });
 }
 
-export function useDrawCompetitions() {
+export function useDrawCompetitions(seasonYear?: string) {
   return useQuery({
-    queryKey: ["draw-competitions"],
+    queryKey: ["draw-competitions", seasonYear ?? "ALL"],
     queryFn: async () => {
-      const response = await fetch("/api/draws");
+      const params = new URLSearchParams();
+      if (seasonYear) params.set("seasonYear", seasonYear);
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      const response = await fetch(`/api/draws${suffix}`);
       if (!response.ok) throw new Error("Failed to load draw competitions");
       return drawCompetitionsResponse.parse(await response.json()).data;
     },
@@ -1116,6 +1119,8 @@ export function useGenerateDraw(competitionId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["draw-competitions"] });
       queryClient.invalidateQueries({ queryKey: ["competition-draw", competitionId] });
+      queryClient.invalidateQueries({ queryKey: ["competition", competitionId] });
+      queryClient.invalidateQueries({ queryKey: ["competitions"] });
       queryClient.invalidateQueries({ queryKey: ["matches"] });
     },
   });
@@ -1125,8 +1130,11 @@ export function useResetDraw(competitionId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (generationYear?: number) => {
-      const suffix = generationYear ? `?generationYear=${generationYear}` : "";
+    mutationFn: async (payload?: { generationYear?: number; resetSchedule?: boolean }) => {
+      const params = new URLSearchParams();
+      if (payload?.generationYear) params.set("generationYear", String(payload.generationYear));
+      if (payload?.resetSchedule) params.set("resetSchedule", "1");
+      const suffix = params.toString() ? `?${params.toString()}` : "";
       const response = await fetch(`/api/draws/${competitionId}${suffix}`, { method: "DELETE" });
       const json = await safeReadJson(response);
       if (!response.ok) throw new Error((json as { error?: string } | null)?.error ?? "Failed to reset draw");
@@ -1135,6 +1143,8 @@ export function useResetDraw(competitionId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["draw-competitions"] });
       queryClient.invalidateQueries({ queryKey: ["competition-draw", competitionId] });
+      queryClient.invalidateQueries({ queryKey: ["competition", competitionId] });
+      queryClient.invalidateQueries({ queryKey: ["competitions"] });
       queryClient.invalidateQueries({ queryKey: ["matches"] });
     },
   });

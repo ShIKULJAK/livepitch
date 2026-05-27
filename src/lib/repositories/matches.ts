@@ -1,4 +1,4 @@
-import { MatchStatus, Prisma } from "@prisma/client";
+import { CompetitionType, MatchStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import type { z } from "zod";
 import { calculatePossessionPercentages } from "@/lib/constants/match";
@@ -280,12 +280,14 @@ export async function listMatchesForExport(
   filters: {
     status?: MatchStatus;
     competitionId?: string;
+    competitionType?: CompetitionType;
   }
 ) {
   const where: Prisma.MatchWhereInput = {
     competition: { organizationId },
     ...(filters.status ? { status: filters.status } : {}),
     ...(filters.competitionId ? { competitionId: filters.competitionId } : {}),
+    ...(filters.competitionType ? { competition: { organizationId, type: filters.competitionType } } : {}),
   };
 
   return prisma.match.findMany({

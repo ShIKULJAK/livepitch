@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { CompetitionStatus, CompetitionType, SportType } from "@prisma/client";
 import {
@@ -121,6 +121,8 @@ export default function EditCompetitionPage() {
   const rejectApplication = useRejectTeamApplication(params.id);
   const generationParticipantsQuery = useCompetitionGenerationParticipants(params.id);
   const [teamSearch, setTeamSearch] = useState("");
+  const [selectedVenueIds, setSelectedVenueIds] = useState<string[]>([]);
+  const [selectedPrimaryPitchName, setSelectedPrimaryPitchName] = useState<string>("");
   const [applicationsSeasonCompetitionId, setApplicationsSeasonCompetitionId] = useState<string>(params.id);
   const [approvalDraft, setApprovalDraft] = useState<Record<string, number[]>>({});
   const [selectedSeasonTeamId, setSelectedSeasonTeamId] = useState<string | null>(null);
@@ -177,12 +179,25 @@ export default function EditCompetitionPage() {
       (venuesQuery.data ?? []).flatMap((venue) =>
         venue.pitches.map((pitch) => ({
           id: pitch.id,
+          venueId: venue.id,
+          venueName: venue.name,
+          pitchName: pitch.name,
           generationLabel: pitch.generationLabel,
           label: `${venue.name} - ${pitch.name} (${pitch.fieldLengthMeters}x${pitch.fieldWidthMeters} m, ${pitch.playerFormat})`,
         }))
       ),
     [venuesQuery.data]
   );
+  const selectedVenueSet = useMemo(() => new Set(selectedVenueIds), [selectedVenueIds]);
+  const filteredPitchOptions = useMemo(
+    () => pitchOptions.filter((pitch) => (selectedVenueSet.size ? selectedVenueSet.has(pitch.venueId) : true)),
+    [pitchOptions, selectedVenueSet]
+  );
+  const primaryVenue = useMemo(
+    () => (venuesQuery.data ?? []).find((venue) => venue.id === selectedVenueIds[0]) ?? null,
+    [venuesQuery.data, selectedVenueIds]
+  );
+  const primaryVenuePitches = primaryVenue?.pitches ?? [];
 
   const availableTeams = useMemo(
     () =>
@@ -198,6 +213,28 @@ export default function EditCompetitionPage() {
   const activeRegistered = activeSeasonTeam
     ? squadDraft[activeSeasonTeam.teamId] ?? activeSeasonTeam.registeredPlayerIds
     : [];
+
+  useEffect(() => {
+    if (selectedVenueIds.length > 0 || !venuesQuery.data?.length || !competition) return;
+    const configuredPitchValues = (draft.pitchNames ?? competition.pitchNames ?? []).map((value) => value.trim()).filter(Boolean);
+    const matchedVenueIds = Array.from(
+      new Set(
+        (venuesQuery.data ?? [])
+          .filter((venue) => venue.pitches.some((pitch) => configuredPitchValues.includes(`${venue.name} - ${pitch.name}`) || configuredPitchValues.includes(pitch.name)))
+          .map((venue) => venue.id)
+      )
+    );
+    const initialVenueIds = matchedVenueIds.length ? matchedVenueIds : [venuesQuery.data[0].id];
+    const initialPrimaryVenue = (venuesQuery.data ?? []).find((item) => item.id === initialVenueIds[0]) ?? null;
+    const initialPrimaryPitchName =
+      (draft.pitchNames ?? competition.pitchNames ?? [])
+        .map((value) => value.split(" - ").pop()?.trim() ?? value.trim())
+        .find((name) => initialPrimaryVenue?.pitches.some((pitch) => pitch.name === name)) ??
+      initialPrimaryVenue?.pitches[0]?.name ??
+      "";
+    setSelectedVenueIds(initialVenueIds);
+    setSelectedPrimaryPitchName(initialPrimaryPitchName);
+  }, [selectedVenueIds.length, venuesQuery.data, competition, draft.pitchNames]);
 
   function toggleParticipant(teamId: string) {
     const next = participantTeamIds.includes(teamId)
@@ -221,8 +258,19 @@ export default function EditCompetitionPage() {
       registrationDeadline: toIsoDate(draft.registrationDeadline ?? toDateInput(competition.registrationDeadline)),
       matchDurationMinutes: Number(draft.matchDurationMinutes ?? String(competition.matchDurationMinutes)),
       generationMatchDurations,
-      stadiumName: draft.stadiumName ?? competition.stadiumName ?? "",
-      pitchNames: pitchNames.length ? pitchNames : ["Teren 1"],
+      stadiumName: primaryVenue?.name ?? draft.stadiumName ?? competition.stadiumName ?? "",
+      pitchNames: Array.from(
+        new Set(
+          filteredPitchOptions
+            .map((item) => `${item.venueName} - ${item.pitchName}`)
+            .concat(
+              selectedPrimaryPitchName && primaryVenue
+                ? [`${primaryVenue.name} - ${selectedPrimaryPitchName}`]
+                : []
+            )
+            .filter(Boolean)
+        )
+      ),
       scheduleDays: scheduleDays.map((day) => ({
         ...day,
         dayDate: day.dayDate ?? new Date().toISOString().slice(0, 10),
@@ -364,6 +412,72 @@ export default function EditCompetitionPage() {
               required
             />
           </FormField>
+          <FormField label="Stadion" tooltip="Glavni stadion za takmičenje." required>
+            <Select
+              value={selectedVenueIds[0] ?? ""}
+              onChange={(event) => {
+                const nextPrimary = event.currentTarget.value;
+                const rest = selectedVenueIds.filter((id) => id !== nextPrimary);
+                const nextIds = nextPrimary ? [nextPrimary, ...rest] : rest;
+                setSelectedVenueIds(nextIds);
+                const venue = (venuesQuery.data ?? []).find((item) => item.id === nextPrimary);
+                if (venue) {
+                  setDraft((current) => ({ ...current, stadiumName: venue.name }));
+                  const defaultPitch = venue.pitches[0]?.name ?? "";
+                  setSelectedPrimaryPitchName(defaultPitch);
+                }
+              }}
+            >
+              <option value="">Izaberi stadion</option>
+              {(venuesQuery.data ?? []).map((venue) => (
+                <option key={venue.id} value={venue.id}>
+                  {venue.name}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <FormField label="Teren" tooltip="Teren u okviru izabranog stadiona." required>
+            <Select
+              value={selectedPrimaryPitchName}
+              onChange={(event) => {
+                setSelectedPrimaryPitchName(event.currentTarget.value);
+              }}
+            >
+              <option value="">Izaberi teren</option>
+              {primaryVenuePitches.map((pitch) => (
+                <option key={pitch.id} value={pitch.name}>
+                  {pitch.name}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <div className="space-y-2 md:col-span-2">
+            <FormField label="Dodatni stadioni" tooltip="Opcionalno dodaj još stadiona za turnir.">
+              <div className="grid gap-2 md:grid-cols-2">
+                {(venuesQuery.data ?? []).map((venue) => {
+                  const checked = selectedVenueIds.includes(venue.id);
+                  return (
+                    <label key={venue.id} className="flex items-center justify-between rounded-lg border px-2 py-1.5 text-sm" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
+                      <span>{venue.name}</span>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          setSelectedVenueIds((current) => {
+                            if (checked) {
+                              const next = current.filter((id) => id !== venue.id);
+                              return next.length ? next : current;
+                            }
+                            return [...current, venue.id];
+                          });
+                        }}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            </FormField>
+          </div>
           <FormField label="Match Duration" tooltip="Regular match time in minutes." required>
             <Input
               type="number"

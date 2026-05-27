@@ -4,23 +4,34 @@ export type GenerationPreset = {
   playerFormat: string;
   fieldLengthMeters: number;
   fieldWidthMeters: number;
+  goalWidthMeters: number;
+  goalHeightMeters: number;
 };
 
-const formatByAge: Record<number, { playerFormat: string; fieldLengthMeters: number; fieldWidthMeters: number }> = {
-  5: { playerFormat: "5+1", fieldLengthMeters: 45, fieldWidthMeters: 25 },
-  6: { playerFormat: "5+1", fieldLengthMeters: 45, fieldWidthMeters: 25 },
-  7: { playerFormat: "5+1", fieldLengthMeters: 45, fieldWidthMeters: 25 },
-  8: { playerFormat: "5+1", fieldLengthMeters: 45, fieldWidthMeters: 25 },
-  9: { playerFormat: "6+1", fieldLengthMeters: 60, fieldWidthMeters: 40 },
-  10: { playerFormat: "6+1", fieldLengthMeters: 60, fieldWidthMeters: 40 },
-  11: { playerFormat: "8+1", fieldLengthMeters: 70, fieldWidthMeters: 50 },
-  12: { playerFormat: "8+1", fieldLengthMeters: 70, fieldWidthMeters: 50 },
-  13: { playerFormat: "10+1", fieldLengthMeters: 82, fieldWidthMeters: 50 },
-  14: { playerFormat: "10+1", fieldLengthMeters: 82, fieldWidthMeters: 50 },
-  15: { playerFormat: "11+1", fieldLengthMeters: 100, fieldWidthMeters: 64 },
-  16: { playerFormat: "11+1", fieldLengthMeters: 100, fieldWidthMeters: 64 },
-  17: { playerFormat: "11+1", fieldLengthMeters: 105, fieldWidthMeters: 68 },
-  18: { playerFormat: "11+1", fieldLengthMeters: 105, fieldWidthMeters: 68 },
+const formatByAge: Record<
+  number,
+  {
+    playerFormat: string;
+    fieldLengthMeters: number;
+    fieldWidthMeters: number;
+    goalWidthMeters: number;
+    goalHeightMeters: number;
+  }
+> = {
+  5: { playerFormat: "5+1", fieldLengthMeters: 45, fieldWidthMeters: 25, goalWidthMeters: 5, goalHeightMeters: 2 },
+  6: { playerFormat: "5+1", fieldLengthMeters: 45, fieldWidthMeters: 25, goalWidthMeters: 5, goalHeightMeters: 2 },
+  7: { playerFormat: "5+1", fieldLengthMeters: 45, fieldWidthMeters: 25, goalWidthMeters: 5, goalHeightMeters: 2 },
+  8: { playerFormat: "5+1", fieldLengthMeters: 45, fieldWidthMeters: 25, goalWidthMeters: 5, goalHeightMeters: 2 },
+  9: { playerFormat: "6+1", fieldLengthMeters: 60, fieldWidthMeters: 40, goalWidthMeters: 5, goalHeightMeters: 2 },
+  10: { playerFormat: "6+1", fieldLengthMeters: 60, fieldWidthMeters: 40, goalWidthMeters: 5, goalHeightMeters: 2 },
+  11: { playerFormat: "8+1", fieldLengthMeters: 70, fieldWidthMeters: 50, goalWidthMeters: 5, goalHeightMeters: 2 },
+  12: { playerFormat: "8+1", fieldLengthMeters: 70, fieldWidthMeters: 50, goalWidthMeters: 5, goalHeightMeters: 2 },
+  13: { playerFormat: "10+1", fieldLengthMeters: 82, fieldWidthMeters: 50, goalWidthMeters: 6.4, goalHeightMeters: 2.13 },
+  14: { playerFormat: "10+1", fieldLengthMeters: 82, fieldWidthMeters: 50, goalWidthMeters: 6.4, goalHeightMeters: 2.13 },
+  15: { playerFormat: "10+1", fieldLengthMeters: 91, fieldWidthMeters: 55, goalWidthMeters: 7.32, goalHeightMeters: 2.44 },
+  16: { playerFormat: "10+1", fieldLengthMeters: 91, fieldWidthMeters: 55, goalWidthMeters: 7.32, goalHeightMeters: 2.44 },
+  17: { playerFormat: "10+1", fieldLengthMeters: 100, fieldWidthMeters: 64, goalWidthMeters: 7.32, goalHeightMeters: 2.44 },
+  18: { playerFormat: "10+1", fieldLengthMeters: 100, fieldWidthMeters: 64, goalWidthMeters: 7.32, goalHeightMeters: 2.44 },
 };
 
 function buildGenerationPresets() {
@@ -35,6 +46,8 @@ function buildGenerationPresets() {
       playerFormat: profile.playerFormat,
       fieldLengthMeters: profile.fieldLengthMeters,
       fieldWidthMeters: profile.fieldWidthMeters,
+      goalWidthMeters: profile.goalWidthMeters,
+      goalHeightMeters: profile.goalHeightMeters,
     });
   }
   return presets.sort((a, b) => Number(b.generationLabel.split(" ")[1]) - Number(a.generationLabel.split(" ")[1]));

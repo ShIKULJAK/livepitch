@@ -1,9 +1,10 @@
-import { MatchStatus } from "@prisma/client";
+import { CompetitionType, MatchStatus } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { listMatchesForExport } from "@/lib/repositories/matches";
 import { formatDateDDMMYYYY } from "@/lib/utils/date";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { prisma } from "@/lib/db/prisma";
 
 function escapeCsvCell(value: string) {
   if (value.includes(";") || value.includes('"') || value.includes("\n")) {
@@ -92,7 +93,21 @@ function wrapTextToWidth(text: string, font: any, fontSize: number, maxWidth: nu
 }
 
 async function buildSchedulePdf(
-  matches: Awaited<ReturnType<typeof listMatchesForExport>>,
+  matches: Array<{
+    id: string;
+    competitionId: string;
+    competition: { name: string; startDate: Date | null; endDate: Date | null; season?: { name: string } | null };
+    generationYear: number | null;
+    round: string | null;
+    scheduledAt: Date;
+    status: MatchStatus;
+    homeScore: number | null;
+    awayScore: number | null;
+    homeTeam: { name: string };
+    awayTeam: { name: string };
+    venueLabel?: string | null;
+    venue?: { name: string | null } | null;
+  }>,
   fileDateLabel: string,
   theme: "dark" | "light"
 ) {
@@ -397,12 +412,110 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const rawStatus = searchParams.get("status");
   const competitionId = searchParams.get("competitionId") ?? undefined;
+  const rawCompetitionType = searchParams.get("competitionType");
+  const rawGeneration = searchParams.get("generation");
+  const rawQuery = (searchParams.get("q") ?? "").trim().toLowerCase();
   const requestedFormat = (searchParams.get("format") ?? "csv").toLowerCase();
   const requestedTheme = (searchParams.get("theme") ?? "dark").toLowerCase();
   const theme: "dark" | "light" = requestedTheme === "light" ? "light" : "dark";
 
   const status = rawStatus && rawStatus in MatchStatus ? (rawStatus as MatchStatus) : undefined;
-  const matches = await listMatchesForExport(currentUser.organizationId, { status, competitionId });
+  const competitionType =
+    rawCompetitionType && rawCompetitionType in CompetitionType
+      ? (rawCompetitionType as CompetitionType)
+      : undefined;
+  const leagueAndGroupMatches = await listMatchesForExport(currentUser.organizationId, {
+    status,
+    competitionId,
+    competitionType,
+  });
+  const knockoutMatchesRaw = await prisma.drawKnockoutMatch.findMany({
+    where: {
+      ...(competitionId ? { round: { draw: { competitionId } } } : {}),
+      round: {
+        draw: {
+          competition: {
+            organizationId: currentUser.organizationId,
+            ...(competitionType ? { type: competitionType } : {}),
+          },
+        },
+      },
+      scheduledAt: { not: null },
+    },
+    include: {
+      round: {
+        include: {
+          draw: {
+            include: {
+              competition: {
+                include: {
+                  season: { select: { name: true } },
+                },
+              },
+            },
+          },
+        },
+      },
+      homeTeam: { select: { name: true } },
+      awayTeam: { select: { name: true } },
+    },
+    orderBy: [{ scheduledAt: "asc" }],
+  });
+
+  const knockoutMatches = knockoutMatchesRaw.map((item) => {
+    const homeName = item.homeTeam?.name ?? item.homeSourceValue ?? "TBD";
+    const awayName = item.awayTeam?.name ?? item.awaySourceValue ?? "TBD";
+    const roundLabel = `${item.round.roundType.replaceAll("_", " ")} ${item.order}`;
+    return {
+      id: `ko-${item.id}`,
+      competitionId: item.round.draw.competitionId,
+      competition: item.round.draw.competition,
+      generationYear: item.round.draw.generationYear ?? null,
+      round: roundLabel,
+      scheduledAt: item.scheduledAt as Date,
+      status: "SCHEDULED" as MatchStatus,
+      homeScore: null,
+      awayScore: null,
+      homeTeam: { name: homeName },
+      awayTeam: { name: awayName },
+      venueLabel: item.venueLabel ?? null,
+      venue: null,
+    };
+  });
+
+  let matches = [...leagueAndGroupMatches, ...knockoutMatches].sort(
+    (a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
+  );
+  if (status) {
+    matches = matches.filter((item) => item.status === status);
+  }
+  if (rawGeneration && rawGeneration !== "ALL") {
+    if (rawGeneration === "NONE") {
+      matches = matches.filter((item) => item.generationYear == null);
+    } else {
+      const year = Number(rawGeneration);
+      if (Number.isFinite(year)) {
+        matches = matches.filter((item) => item.generationYear === year);
+      }
+    }
+  }
+  if (rawQuery) {
+    matches = matches.filter((item) => {
+      const venueLabel = item.venueLabel?.trim() || item.venue?.name?.trim() || "";
+      const haystack = [
+        item.competition.name,
+        item.homeTeam.name,
+        item.awayTeam.name,
+        item.round ?? "",
+        item.competition.season?.name ?? "",
+        item.generationYear ? String(item.generationYear) : "",
+        venueLabel,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(rawQuery);
+    });
+  }
   const todayLabel = formatDateDDMMYYYY(new Date());
   const csvTournamentInfo = (() => {
     if (!matches.length) return { name: "-", dateFrom: "-", dateTo: "-" };

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useDrawCompetitions } from "@/hooks/use-competitions";
+import { useEffect, useRef, useState } from "react";
+import { useCompetitionSeasons, useDrawCompetitions } from "@/hooks/use-competitions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,7 +10,18 @@ import { Card } from "@/components/ui/card";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 
 export default function DrawsPage() {
-  const drawCompetitionsQuery = useDrawCompetitions();
+  const seasonsQuery = useCompetitionSeasons();
+  const [seasonYear, setSeasonYear] = useState<string>("ALL");
+  const didApplyDefaultSeason = useRef(false);
+  useEffect(() => {
+    if (!seasonsQuery.data) return;
+    if (didApplyDefaultSeason.current) return;
+    const currentYear = String(new Date().getFullYear());
+    const hasCurrentYear = seasonsQuery.data.years.some((entry) => entry.year === currentYear);
+    if (hasCurrentYear) setSeasonYear(currentYear);
+    didApplyDefaultSeason.current = true;
+  }, [seasonsQuery.data]);
+  const drawCompetitionsQuery = useDrawCompetitions(seasonYear !== "ALL" ? seasonYear : undefined);
 
   return (
     <div className="space-y-4">

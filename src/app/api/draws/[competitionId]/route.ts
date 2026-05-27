@@ -190,13 +190,16 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ competi
   const requestUrl = new URL(_.url);
   const generationYearRaw = requestUrl.searchParams.get("generationYear");
   const generationYear = generationYearRaw ? Number(generationYearRaw) : undefined;
+  const resetScheduleRaw = requestUrl.searchParams.get("resetSchedule");
+  const resetScheduleDays = resetScheduleRaw === "1" || resetScheduleRaw === "true";
   let data = null;
   try {
     data = await resetDraw(
       currentUser.organizationId,
       { id: currentUser.id, role: currentUser.role },
       competitionId,
-      Number.isFinite(generationYear) ? generationYear : undefined
+      Number.isFinite(generationYear) ? generationYear : undefined,
+      resetScheduleDays
     );
   } catch (error) {
     if (error instanceof Error && error.message === "Forbidden") {

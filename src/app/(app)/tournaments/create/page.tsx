@@ -256,8 +256,12 @@ export default function CreateTournamentPage() {
         pitchNames: Array.from(
           new Set(
             filteredPitchOptions
-              .map((item) => item.pitchName)
-              .concat(selectedPrimaryPitchName ? [selectedPrimaryPitchName] : [])
+              .map((item) => `${item.venueName} - ${item.pitchName}`)
+              .concat(
+                selectedPrimaryPitchName && primaryVenue
+                  ? [`${primaryVenue.name} - ${selectedPrimaryPitchName}`]
+                  : []
+              )
               .filter(Boolean)
           )
         ),

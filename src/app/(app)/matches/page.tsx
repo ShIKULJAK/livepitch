@@ -157,7 +157,12 @@ function MatchesPageContent() {
   async function exportMatches(format: "csv" | "pdf") {
     const params = new URLSearchParams();
     if (statusFilter !== "ALL") params.set("status", statusFilter);
-    if (competitionId) params.set("competitionId", competitionId);
+    if (competitionFilter !== "ALL") params.set("competitionId", competitionFilter);
+    else if (competitionId) params.set("competitionId", competitionId);
+    if (competitionTypeFilter !== "ALL") params.set("competitionType", competitionTypeFilter);
+    if (generationFilter !== "ALL") params.set("generation", generationFilter);
+    const q = searchValue.trim();
+    if (q) params.set("q", q);
     params.set("format", format);
     const theme = document.documentElement.classList.contains("dark") ? "dark" : "light";
     params.set("theme", theme);

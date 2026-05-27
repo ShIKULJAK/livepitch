@@ -39,6 +39,33 @@ type ScheduleDayConfig = {
 
 const ALL_GENERATIONS_LABEL = "Sve generacije";
 
+type GenerationProfile = {
+  playerFormat: string;
+  fieldLengthMeters: number;
+  fieldWidthMeters: number;
+  goalWidthMeters?: number;
+  goalHeightMeters?: number;
+};
+
+function resolveGenerationProfile(generationLabel: string): GenerationProfile | null {
+  const year = Number(generationLabel.replace("Generacija ", ""));
+  if (Number.isFinite(year)) {
+    if (year >= 2018 && year <= 2021) return { playerFormat: "5+1", fieldLengthMeters: 45, fieldWidthMeters: 25, goalWidthMeters: 5, goalHeightMeters: 2 };
+    if (year >= 2016 && year <= 2017) return { playerFormat: "6+1", fieldLengthMeters: 60, fieldWidthMeters: 40, goalWidthMeters: 5, goalHeightMeters: 2 };
+    if (year >= 2014 && year <= 2015) return { playerFormat: "8+1", fieldLengthMeters: 70, fieldWidthMeters: 50, goalWidthMeters: 5, goalHeightMeters: 2 };
+    if (year >= 2011 && year <= 2013) return { playerFormat: "10+1", fieldLengthMeters: 82, fieldWidthMeters: 50, goalWidthMeters: 6.4, goalHeightMeters: 2.13 };
+  }
+  const preset = getGenerationPreset(generationLabel);
+  if (!preset) return null;
+  return {
+    playerFormat: preset.playerFormat,
+    fieldLengthMeters: preset.fieldLengthMeters,
+    fieldWidthMeters: preset.fieldWidthMeters,
+    goalWidthMeters: preset.goalWidthMeters,
+    goalHeightMeters: preset.goalHeightMeters,
+  };
+}
+
 function normalizeStageScope(value?: string | null): ScheduleStageScope {
   if (value === "GROUP_STAGE" || value === "KNOCKOUT" || value === "ALL") return value;
   return "ALL";
@@ -48,7 +75,7 @@ function scorePitchForGeneration(
   pitch: { generationLabel: string | null; playerFormat: string; fieldLengthMeters: number; fieldWidthMeters: number },
   generationLabel: string
 ) {
-  const preset = getGenerationPreset(generationLabel);
+  const preset = resolveGenerationProfile(generationLabel);
   if (!preset) return 0;
   let score = 0;
   if (pitch.generationLabel?.trim() === generationLabel) score += 100;
@@ -269,7 +296,7 @@ function buildScheduledFixtures(
     const scopedPitches =
       day.pitchName && day.pitchName.trim().length > 0
         ? [day.pitchName.trim()]
-        : [];
+        : pitchNames;
     return scopedPitches.map((pitchName) => ({
       pitchName,
       dayIndex,
@@ -316,9 +343,14 @@ function buildScheduledFixtures(
     const duration = endTs.getTime() - startTs.getTime();
     dayCapacities.push(duration > 0 ? Math.max(0, Math.floor(duration / slotMs)) : 0);
     dayMatchCounts.push(0);
-    const scopedPitches = day.pitchName && day.pitchName.trim().length > 0 ? [day.pitchName.trim()] : [];
+    const scopedPitches =
+      day.pitchName && day.pitchName.trim().length > 0
+        ? [day.pitchName.trim()]
+        : pitchNames;
     pitchState.push(
-      ...scopedPitches.map((pitchName) => ({
+      ...scopedPitches
+        .filter((pitchName) => pitchNames.includes(pitchName))
+        .map((pitchName) => ({
         pitchName,
         dayIndex: nextIndex,
         nextStartAt: startTs.getTime(),
@@ -448,9 +480,10 @@ function buildKnockoutScheduleSlotPicker(
   startAt: Date,
   slotDurationMinutes: number,
   occupiedIntervalsByPitch: Map<string, Array<{ startAt: number; endAt: number }>>,
-  options?: { tournamentEndDate?: Date | null }
+  options?: { tournamentEndDate?: Date | null; minStartAt?: Date | null }
 ) {
   const slotMs = slotDurationMinutes * 60 * 1000;
+  const knockoutFloorTs = options?.minStartAt ? options.minStartAt.getTime() : null;
   const effectiveDays = [...scheduleDays];
   const addedDays: ScheduleDayConfig[] = [];
   const fallbackWindow = {
@@ -503,13 +536,16 @@ function buildKnockoutScheduleSlotPicker(
   const dayMatchCounts = dayStarts.map(() => 0);
 
   const pitchState = dayStarts.flatMap((day, dayIndex) => {
-    const scopedPitches = day.pitchName && day.pitchName.trim().length > 0 ? [day.pitchName.trim()] : [];
+    const scopedPitches =
+      day.pitchName && day.pitchName.trim().length > 0
+        ? [day.pitchName.trim()]
+        : pitchNames;
     return scopedPitches
       .filter((pitchName) => pitchNames.includes(pitchName))
       .map((pitchName) => ({
         pitchName,
         dayIndex,
-        nextStartAt: day.startTs,
+        nextStartAt: knockoutFloorTs != null ? Math.max(day.startTs, knockoutFloorTs) : day.startTs,
       }));
   });
 
@@ -545,14 +581,18 @@ function buildKnockoutScheduleSlotPicker(
     const duration = endTs.getTime() - startTs.getTime();
     dayCapacities.push(duration > 0 ? Math.max(0, Math.floor(duration / slotMs)) : 0);
     dayMatchCounts.push(0);
-    const scopedPitches = day.pitchName && day.pitchName.trim().length > 0 ? [day.pitchName.trim()] : [];
+    const scopedPitches =
+      day.pitchName && day.pitchName.trim().length > 0
+        ? [day.pitchName.trim()]
+        : pitchNames;
     pitchState.push(
       ...scopedPitches
         .filter((pitchName) => pitchNames.includes(pitchName))
         .map((pitchName) => ({
           pitchName,
           dayIndex: nextIndex,
-          nextStartAt: startTs.getTime(),
+          nextStartAt:
+            knockoutFloorTs != null ? Math.max(startTs.getTime(), knockoutFloorTs) : startTs.getTime(),
         }))
     );
   };
@@ -783,9 +823,18 @@ async function ensureCompetition(organizationId: string, competitionId: string) 
   return competition;
 }
 
-export async function listDrawCompetitions(organizationId: string) {
+export async function listDrawCompetitions(organizationId: string, seasonYear?: string) {
   const competitions = await prisma.competition.findMany({
-    where: { organizationId },
+    where: {
+      organizationId,
+      ...(seasonYear
+        ? {
+            season: {
+              OR: [{ name: seasonYear }, { name: { startsWith: `${seasonYear}/` } }],
+            },
+          }
+        : {}),
+    },
     include: {
       season: { select: { id: true, name: true } },
       teams: { include: { team: { select: { id: true, name: true } } } },
@@ -902,7 +951,8 @@ export async function resetDraw(
   organizationId: string,
   actor: { id: string; role: string },
   competitionId: string,
-  generationYear?: number
+  generationYear?: number,
+  resetScheduleDays = false
 ) {
   const competition = await ensureCompetition(organizationId, competitionId);
   if (!competition) return null;
@@ -935,6 +985,25 @@ export async function resetDraw(
     });
   }
   await prisma.draw.deleteMany({ where: { competitionId, ...(generationYear == null ? {} : { generationYear }) } });
+  if (resetScheduleDays) {
+    const defaultDayDate = (competition.startDate ?? new Date()).toISOString().slice(0, 10);
+    await prisma.competition.update({
+      where: { id: competitionId },
+      data: {
+        scheduleDays: [
+          {
+            dayLabel: "Dan 1",
+            dayDate: defaultDayDate,
+            generationLabel: ALL_GENERATIONS_LABEL,
+            stageScope: "ALL",
+            pitchId: null,
+            startTime: "09:00",
+            endTime: "19:00",
+          },
+        ] as Prisma.InputJsonValue,
+      },
+    });
+  }
   return { ok: true };
 }
 
@@ -1006,12 +1075,7 @@ export async function generateDraw(
           (day.generationLabel === generationLabel || day.generationLabel === ALL_GENERATIONS_LABEL) &&
           (normalizeStageScope(day.stageScope) === "GROUP_STAGE" || normalizeStageScope(day.stageScope) === "ALL")
       );
-      const groupOverflowDays = scheduleDays.filter(
-        (day) =>
-          (day.generationLabel === generationLabel || day.generationLabel === ALL_GENERATIONS_LABEL) &&
-          normalizeStageScope(day.stageScope) === "KNOCKOUT"
-      );
-      const groupScheduleDays = [...groupPreferredDays, ...groupOverflowDays];
+      const groupScheduleDays = groupPreferredDays;
       const knockoutScheduleDays = scheduleDays.filter(
         (day) =>
           (day.generationLabel === generationLabel || day.generationLabel === ALL_GENERATIONS_LABEL) &&
@@ -1020,9 +1084,11 @@ export async function generateDraw(
     if (!groupScheduleDays.length) {
       throw new Error(`Nema definisanih termina za ${generationLabel}.`);
     }
+    const relevantScheduleDays = [...groupScheduleDays, ...knockoutScheduleDays];
+    const hasAutoPitchSelection = relevantScheduleDays.some((day) => !day.pitchId);
     const dayPitchIds = Array.from(
       new Set(
-        [...groupScheduleDays, ...knockoutScheduleDays]
+        relevantScheduleDays
           .map((day) => day.pitchId)
           .filter((value): value is string => Boolean(value))
       )
@@ -1038,6 +1104,8 @@ export async function generateDraw(
         playerFormat: true,
         fieldLengthMeters: true,
         fieldWidthMeters: true,
+        goalWidthMeters: true,
+        goalHeightMeters: true,
       },
     });
     const configuredPitchValues = (competition.pitchNames ?? []).map((value) => value.trim()).filter(Boolean);
@@ -1048,7 +1116,7 @@ export async function generateDraw(
     const configuredSet = new Set(configuredPitchValues);
     const configuredLeafSet = new Set(configuredPitchLeafNames);
 
-    let selectedPitches = dayPitchIds.length
+    let selectedPitches = dayPitchIds.length && !hasAutoPitchSelection
       ? allActivePitches.filter((pitch) => dayPitchIds.includes(pitch.id))
       : [];
 
@@ -1063,31 +1131,70 @@ export async function generateDraw(
       selectedPitches = allActivePitches.filter((pitch) => pitch.venueId === competition.venueId);
     }
 
-    if (!selectedPitches.length) {
+    const hasCompetitionVenueConfig = configuredPitchValues.length > 0 || Boolean(competition.venueId);
+    if (!selectedPitches.length && !hasCompetitionVenueConfig) {
       selectedPitches = allActivePitches;
     }
 
-    const selectedPitchNames = selectedPitches.map((item) => item.name);
-    if (!selectedPitchNames.length) {
+    const pitchLabelById = new Map(
+      selectedPitches.map((pitch) => [
+        pitch.id,
+        pitch.venue?.name ? `${pitch.venue.name} - ${pitch.name}` : pitch.name,
+      ])
+    );
+    const selectedPitchLabels = selectedPitches
+      .map((item) => pitchLabelById.get(item.id) ?? item.name)
+      .filter(Boolean);
+    const selectedPitchLegacyNames = selectedPitches.map((item) => item.name).filter(Boolean);
+    if (!selectedPitchLabels.length) {
       throw new Error(`Nije pronađen nijedan aktivan teren za ${generationLabel}.`);
     }
-    const pitchById = new Map(selectedPitches.map((pitch) => [pitch.id, pitch.name]));
-    const compatiblePitchIdsSorted = selectedPitches
-      .map((pitch) => ({ id: pitch.id, score: scorePitchForGeneration(pitch, generationLabel) }))
-      .sort((a, b) => b.score - a.score)
-      .map((item) => item.id);
-    const compatiblePitchIds = compatiblePitchIdsSorted.length ? compatiblePitchIdsSorted : selectedPitches.map((pitch) => pitch.id);
+    // Generacija je preporuka za tip terena, ali organizator može koristiti i druge terene.
+    const generationPreset = resolveGenerationProfile(generationLabel);
+    const preferredCompatiblePitches = generationPreset
+      ? selectedPitches.filter((pitch) => {
+          const formatOk = pitch.playerFormat?.trim() === generationPreset.playerFormat;
+          const sizeOk =
+            pitch.fieldLengthMeters === generationPreset.fieldLengthMeters &&
+            pitch.fieldWidthMeters === generationPreset.fieldWidthMeters;
+          return formatOk && sizeOk;
+        })
+      : [];
+    if (preferredCompatiblePitches.length) {
+      selectedPitches = preferredCompatiblePitches.concat(
+        selectedPitches.filter((item) => !preferredCompatiblePitches.some((pick) => pick.id === item.id))
+      );
+    }
+    const strictPitchLabelById = new Map(
+      selectedPitches.map((pitch) => [
+        pitch.id,
+        pitch.venue?.name ? `${pitch.venue.name} - ${pitch.name}` : pitch.name,
+      ])
+    );
+    const strictPitchLabels = selectedPitches
+      .map((item) => strictPitchLabelById.get(item.id) ?? item.name)
+      .filter(Boolean);
+    const strictPitchLegacyNames = selectedPitches.map((item) => item.name).filter(Boolean);
+    const pitchById = new Map(selectedPitches.map((pitch) => [pitch.id, strictPitchLabelById.get(pitch.id) ?? pitch.name]));
+    const scoredPitches = selectedPitches
+      .map((pitch) => ({ pitch, score: scorePitchForGeneration(pitch, generationLabel) }))
+      .sort((a, b) => b.score - a.score);
+    const recommendedByScore = scoredPitches.filter((item) => item.score > 0).map((item) => item.pitch);
+    const autoPitchPool = preferredCompatiblePitches.length
+      ? preferredCompatiblePitches
+      : recommendedByScore.length
+        ? recommendedByScore
+        : selectedPitches;
+    const autoPitchLabels = autoPitchPool
+      .map((pitch) => strictPitchLabelById.get(pitch.id) ?? pitch.name)
+      .filter(Boolean);
+    const effectiveAutoPitchLabels = autoPitchLabels.length ? autoPitchLabels : strictPitchLabels;
 
     const applyAutoPitch = (
       rows: Array<{ pitchId?: string | null; generationLabel?: string; stageScope?: ScheduleStageScope }>
     ) =>
-      rows.map((row, index) => {
-        if (row.pitchId) return row;
-        const isAllGenerations = row.generationLabel === ALL_GENERATIONS_LABEL || !row.generationLabel;
-        const isAllStages = normalizeStageScope(row.stageScope) === "ALL";
-        if (!isAllGenerations && !isAllStages) return row;
-        return { ...row, pitchId: compatiblePitchIds[index % compatiblePitchIds.length] ?? compatiblePitchIds[0] };
-      });
+      // AUTO mode: keep pitchId null so scheduler can use all selected competition pitches.
+      rows.map((row) => row);
 
     const groupScheduleDaysWithAutoPitch = applyAutoPitch(groupScheduleDays as Array<{ pitchId?: string | null; generationLabel?: string; stageScope?: ScheduleStageScope }>) as typeof groupScheduleDays;
     const knockoutScheduleDaysWithAutoPitch = applyAutoPitch(
@@ -1109,20 +1216,11 @@ export async function generateDraw(
       competition.matchDurationMinutes
     );
     const slotDurationMinutes = generationMatchDurationMinutes + 5;
-    const venuePrefix = competition.stadiumName ? `${competition.stadiumName} - ` : null;
     const existingMatches = await tx.match.findMany({
       where: {
         competition: { organizationId },
-        pitchName: { in: selectedPitchNames },
+        pitchName: { in: Array.from(new Set([...strictPitchLabels, ...strictPitchLegacyNames])) },
         status: { not: "CANCELED" },
-        ...(venuePrefix
-          ? {
-              OR: [
-                { venueLabel: { startsWith: venuePrefix } },
-                { venueLabel: null },
-              ],
-            }
-          : {}),
       },
       select: {
         pitchName: true,
@@ -1133,7 +1231,7 @@ export async function generateDraw(
     const existingKnockoutSlots = await tx.drawKnockoutMatch.findMany({
       where: {
         scheduledAt: { not: null },
-        pitchName: { in: selectedPitchNames },
+        pitchName: { in: Array.from(new Set([...strictPitchLabels, ...strictPitchLegacyNames])) },
         round: {
           draw: {
             competition: {
@@ -1141,14 +1239,6 @@ export async function generateDraw(
             },
           },
         },
-        ...(venuePrefix
-          ? {
-              OR: [
-                { venueLabel: { startsWith: venuePrefix } },
-                { venueLabel: null },
-              ],
-            }
-          : {}),
       },
       select: {
         pitchName: true,
@@ -1196,6 +1286,7 @@ export async function generateDraw(
       endTime: string;
       stageScope?: ScheduleStageScope;
     }> = [];
+    let groupPhaseEndAt: Date | null = null;
 
     if (config.groupStageEnabled) {
       const groups = distributeParticipants(participants, config.groupsCount);
@@ -1229,7 +1320,7 @@ export async function generateDraw(
       );
       const scheduledFixtureResult = buildScheduledFixtures(
         fixtures,
-        selectedPitchNames,
+        effectiveAutoPitchLabels,
         placeholderBaseDate,
         groupScheduleWithPitch,
         slotDurationMinutes,
@@ -1248,12 +1339,16 @@ export async function generateDraw(
         }))
       );
       const scheduledFixtures = scheduledFixtureResult.scheduled;
+      if (scheduledFixtures.length) {
+        const maxGroupEndTs = Math.max(
+          ...scheduledFixtures.map((item) => item.scheduledAt.getTime() + slotDurationMinutes * 60 * 1000)
+        );
+        groupPhaseEndAt = new Date(maxGroupEndTs);
+      }
 
       for (const scheduledFixture of scheduledFixtures) {
         const fixture = scheduledFixture.fixture;
-        const venueLabel = competition.stadiumName
-          ? `${competition.stadiumName} - ${scheduledFixture.pitchName}`
-          : `Stadion - ${scheduledFixture.pitchName}`;
+        const venueLabel = scheduledFixture.pitchName;
         await tx.match.create({
           data: {
             competitionId: competition.id,
@@ -1398,12 +1493,12 @@ export async function generateDraw(
         },
       });
       const nextKnockoutSlot = buildKnockoutScheduleSlotPicker(
-        selectedPitchNames,
+        effectiveAutoPitchLabels,
         knockoutScheduleWithPitch,
         placeholderBaseDate,
         slotDurationMinutes,
         occupiedIntervalsByPitch,
-        { tournamentEndDate: competition.endDate ?? null }
+        { tournamentEndDate: competition.endDate ?? null, minStartAt: groupPhaseEndAt }
       );
       const appendedKnockoutDayKeys = new Set<string>();
       for (const match of round.matches) {
@@ -1422,9 +1517,7 @@ export async function generateDraw(
             stageScope: "KNOCKOUT",
           });
         }
-        const venueLabel = competition.stadiumName
-          ? `${competition.stadiumName} - ${slot.pitchName}`
-          : `Stadion - ${slot.pitchName}`;
+        const venueLabel = slot.pitchName;
         await tx.drawKnockoutMatch.create({
           data: {
             roundId: createdRound.id,

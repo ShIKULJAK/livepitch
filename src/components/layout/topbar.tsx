@@ -211,7 +211,7 @@ export function Topbar() {
       label = localeLabels.details;
     } else {
       label = decodeURIComponent(segment)
-        .replace(/-/g, " ")
+        .replace(/[-_]/g, " ")
         .replace(/\b\w/g, (char) => char.toUpperCase());
     }
 

@@ -33,9 +33,21 @@ function getCookieNamesFromHeader(request: Request) {
     .filter(Boolean) as string[];
 }
 
+function resolveRedirectOrigin(request: Request) {
+  const requestUrl = new URL(request.url);
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const hostHeader = request.headers.get("host")?.split(",")[0]?.trim();
+
+  const protocol = forwardedProto || requestUrl.protocol.replace(":", "") || "http";
+  const rawHost = forwardedHost || hostHeader || requestUrl.host || "localhost:3000";
+  const host = rawHost.startsWith("0.0.0.0") ? rawHost.replace(/^0\.0\.0\.0/, "localhost") : rawHost;
+
+  return `${protocol}://${host}`;
+}
+
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const response = NextResponse.redirect(new URL("/login", url.origin));
+  const response = NextResponse.redirect(new URL("/login", resolveRedirectOrigin(request)));
   const presentCookies = getCookieNamesFromHeader(request);
   const dynamicAuthCookies = presentCookies.filter((name) =>
     AUTH_COOKIE_PREFIXES.some((prefix) => name.startsWith(prefix))

@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { useDeletePlayer, usePlayers } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { canCreatePlayers, canEditEntity } from "@/lib/permissions";
@@ -12,6 +12,15 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { formatDateDDMMYYYY } from "@/lib/utils/date";
+
+function toPlayerSlug(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
 function InfoRow({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -33,8 +42,17 @@ export default function PlayerDetailsPage() {
   const playersQuery = usePlayers();
   const deletePlayer = useDeletePlayer();
   const { user } = useCurrentUser();
-  const player = (playersQuery.data ?? []).find((item) => item.id === params.id);
+  const player = (playersQuery.data ?? []).find((item) => item.id === params.id || toPlayerSlug(item.fullName) === params.id);
   const canEdit = canCreatePlayers(user?.role) && canEditEntity(user, player);
+
+  useEffect(() => {
+    if (!player) return;
+    const canonicalSlug = toPlayerSlug(player.fullName);
+    if (params.id !== canonicalSlug) {
+      router.replace(`/players/${canonicalSlug}`);
+    }
+  }, [params.id, player, router]);
+
   const infoRows = [
     { label: "Sport", value: player?.sport },
     {

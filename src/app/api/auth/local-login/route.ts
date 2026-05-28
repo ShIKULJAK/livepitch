@@ -22,6 +22,10 @@ function relativeRedirect(path: string, status = 303) {
   });
 }
 
+export async function GET() {
+  return relativeRedirect("/login");
+}
+
 export async function POST(request: Request) {
   const contentType = request.headers.get("content-type") ?? "";
   const isJsonRequest = contentType.includes("application/json");

@@ -13,6 +13,15 @@ import { useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { canCreatePlayers, canEditEntity } from "@/lib/permissions";
 
+function toPlayerSlug(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function getPlayerInitials(firstName?: string | null, lastName?: string | null, fullName?: string | null) {
   const fn = firstName?.trim();
   const ln = lastName?.trim();
@@ -146,7 +155,7 @@ export default function PlayersPage() {
                   <td className="px-4 py-3 text-center">{player.number ?? ""}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-3">
-                      <Link href={`/players/${player.id}`} style={{ color: "var(--primary)" }}>{t("common.open")}</Link>
+                      <Link href={`/players/${toPlayerSlug(player.fullName)}`} style={{ color: "var(--primary)" }}>{t("common.open")}</Link>
                       {canEditRow ? (
                         <>
                           <Link href={`/players/${player.id}/edit`} style={{ color: "var(--info)" }}>

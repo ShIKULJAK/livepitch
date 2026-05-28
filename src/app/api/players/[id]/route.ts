@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { canCreatePlayers } from "@/lib/permissions";
-import { deletePlayer, updatePlayer } from "@/lib/repositories/players";
+import { deletePlayer, updatePlayer, updatePlayerClubHistory } from "@/lib/repositories/players";
 import { ImageProcessingError, processAndStoreProfileImage } from "@/lib/server/image-processing";
-import { playerUpdateSchema } from "@/lib/validation/player";
+import { playerHistoryPatchSchema, playerUpdateSchema } from "@/lib/validation/player";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const currentUser = await requireAuth();
@@ -33,6 +33,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
 
     const rawNationalities = formData.get("nationalities");
+    const rawClubHistory = formData.get("clubHistory");
+    let parsedClubHistory: unknown = undefined;
+    if (typeof rawClubHistory === "string" && rawClubHistory.trim().length) {
+      try {
+        parsedClubHistory = JSON.parse(rawClubHistory);
+      } catch {
+        parsedClubHistory = undefined;
+      }
+    }
     payload = {
       sport: formData.get("sport") || undefined,
       teamId: formData.get("teamId") || undefined,
@@ -49,22 +58,39 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       status: formData.get("status") || undefined,
       dominantFoot: formData.get("dominantFoot") || undefined,
       profileImageUrl,
+      clubHistory: parsedClubHistory,
     };
   } else {
     payload = await request.json();
   }
 
-  const parsed = playerUpdateSchema.safeParse(payload);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid payload", issues: parsed.error.issues }, { status: 400 });
+  const parsedPlayer = playerUpdateSchema.safeParse(payload);
+  const parsedHistory = playerHistoryPatchSchema.safeParse(payload);
+  if (!parsedPlayer.success || !parsedHistory.success) {
+    return NextResponse.json(
+      {
+        error: "Invalid payload",
+        issues: [...(parsedPlayer.success ? [] : parsedPlayer.error.issues), ...(parsedHistory.success ? [] : parsedHistory.error.issues)],
+      },
+      { status: 400 }
+    );
   }
 
   const { id } = await params;
 
   try {
-    const data = await updatePlayer(currentUser.organizationId, { id: currentUser.id, role: currentUser.role }, id, parsed.data);
+    const data = await updatePlayer(currentUser.organizationId, { id: currentUser.id, role: currentUser.role }, id, parsedPlayer.data);
     if (!data) {
       return NextResponse.json({ error: "Player not found" }, { status: 404 });
+    }
+
+    if (parsedHistory.data.clubHistory?.length) {
+      await updatePlayerClubHistory(
+        currentUser.organizationId,
+        { id: currentUser.id, role: currentUser.role },
+        id,
+        parsedHistory.data.clubHistory
+      );
     }
 
     return NextResponse.json({ data });

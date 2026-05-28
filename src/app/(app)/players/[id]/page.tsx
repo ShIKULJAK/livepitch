@@ -87,6 +87,8 @@ export default function PlayerDetailsPage() {
     { label: "Age", value: player?.age },
   ].filter((item) => item.value !== null && item.value !== undefined && item.value !== "");
 
+  const clubHistory = (player?.clubHistory ?? []).slice().sort((a, b) => b.fromYear - a.fromYear);
+
   if (playersQuery.isLoading) return <LoadingSkeleton />;
   if (!player) return <Card className="p-4 text-sm" style={{ color: "var(--danger)" }}>Player not found.</Card>;
 
@@ -142,6 +144,60 @@ export default function PlayerDetailsPage() {
               <InfoRow key={row.label} label={row.label} value={row.value as ReactNode} />
             ))}
           </ul>
+          <div className="rounded-xl border p-4 md:col-start-2 md:p-5" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold uppercase tracking-wide" style={{ color: "var(--text-secondary)" }}>
+                Istorija klubova
+              </p>
+              <span
+                className="rounded-full px-2.5 py-1 text-[11px] font-medium"
+                style={{
+                  color: "var(--text-secondary)",
+                  backgroundColor: "color-mix(in srgb, var(--surface-1) 80%, transparent)",
+                }}
+              >
+                {clubHistory.length} zapisa
+              </span>
+            </div>
+            {clubHistory.length ? (
+              <ul className="space-y-3">
+                {clubHistory.map((entry, index) => (
+                  <li
+                    key={entry.id}
+                    className="relative rounded-lg border px-3 py-3 md:px-4"
+                    style={{ borderColor: "var(--border)", backgroundColor: "color-mix(in srgb, var(--surface-1) 72%, transparent)" }}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">{entry.teamName}</p>
+                        <p className="mt-0.5 text-xs leading-5" style={{ color: "var(--text-secondary)" }}>
+                          {index === 0 ? "Aktuelni ili posljednji klub" : "Prethodni klub"}
+                        </p>
+                      </div>
+                      <span
+                        className="shrink-0 rounded-full px-2.5 py-1 text-xs font-medium"
+                        style={{
+                          color: entry.toYear ? "var(--text-secondary)" : "var(--primary)",
+                          backgroundColor: entry.toYear
+                            ? "color-mix(in srgb, var(--surface-1) 70%, transparent)"
+                            : "color-mix(in srgb, var(--primary) 16%, transparent)",
+                        }}
+                      >
+                        {entry.fromYear} - {entry.toYear ?? "danas"}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div
+                className="rounded-lg border px-3 py-4 text-sm"
+                style={{ borderColor: "var(--border)", color: "var(--text-secondary)", backgroundColor: "color-mix(in srgb, var(--surface-1) 70%, transparent)" }}
+              >
+                Nema podataka o promjeni klubova.
+              </div>
+            )}
+          </div>
         </div>
       </Card>
     </div>

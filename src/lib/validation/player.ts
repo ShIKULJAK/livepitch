@@ -20,3 +20,15 @@ export const playerInputSchema = z.object({
 
 export const playerUpdateSchema = playerInputSchema.partial();
 
+export const playerHistoryPatchSchema = z.object({
+  clubHistory: z
+    .array(
+      z.object({
+        id: z.string().min(1).optional(),
+        teamId: z.string().min(1),
+        fromYear: z.number().int().min(1900).max(3000),
+        toYear: z.number().int().min(1900).max(3000).nullable(),
+      })
+    )
+    .optional(),
+});

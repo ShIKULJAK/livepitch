@@ -234,6 +234,7 @@ model Team {
   drawKnockoutWinnerMatches DrawKnockoutMatch[] @relation("DrawKnockoutWinnerTeam")
   applications              TeamApplication[]
   generationParticipations  CompetitionTeamGeneration[]
+  playerClubHistories       PlayerClubHistory[]
   homeVenues      Venue[]            @relation("TeamVenues")
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
@@ -262,8 +263,24 @@ model Player {
   matchEvents  MatchEvent[]
   goalEvents   MatchGoalEvent[]
   seasonRegistrations CompetitionSeasonTeamPlayer[]
+  clubHistory   PlayerClubHistory[]
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
+}
+
+model PlayerClubHistory {
+  id         String   @id @default(cuid())
+  playerId   String
+  player     Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  teamId     String
+  team       Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  fromYear   Int
+  toYear     Int?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([playerId, fromYear])
+  @@index([teamId, fromYear])
 }
 
 model Competition {

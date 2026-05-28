@@ -625,7 +625,15 @@ export async function listTeams(organizationId: string) {
 export async function listPlayers(organizationId: string) {
   const players = await prisma.player.findMany({
     where: { team: { organizationId } },
-    include: { team: true },
+    include: {
+      team: true,
+      clubHistory: {
+        include: {
+          team: { select: { id: true, name: true } },
+        },
+        orderBy: [{ fromYear: "desc" }, { createdAt: "desc" }],
+      },
+    },
     orderBy: { fullName: "asc" },
   });
 
@@ -650,6 +658,13 @@ export async function listPlayers(organizationId: string) {
     teamId: player.teamId,
     team: player.team.name,
     teamProfileImageUrl: player.team.profileImageUrl,
+    clubHistory: player.clubHistory.map((item) => ({
+      id: item.id,
+      teamId: item.teamId,
+      teamName: item.team.name,
+      fromYear: item.fromYear,
+      toYear: item.toYear,
+    })),
     age: player.dateOfBirth ? Math.max(0, new Date().getFullYear() - player.dateOfBirth.getFullYear()) : null,
   }));
 }

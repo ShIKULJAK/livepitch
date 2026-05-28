@@ -58,6 +58,7 @@ export default function EditPlayerPage() {
     weightKg?: string;
     status?: PlayerStatus;
     dominantFoot?: DominantFoot;
+    clubHistory?: Array<{ id?: string; teamId: string; teamName: string; fromYear: string; toYear: string }>;
   }>({});
   const [nationalityInput, setNationalityInput] = useState("");
   const [image, setImage] = useState<File | null>(null);
@@ -74,6 +75,15 @@ export default function EditPlayerPage() {
     return player.nationalities.length ? player.nationalities : player.nationality ? [player.nationality] : [];
   }, [player]);
   const nationalities = draft.nationalities ?? sourceNationalities;
+  const clubHistoryDraft =
+    draft.clubHistory ??
+    (player?.clubHistory ?? []).map((item) => ({
+      id: item.id,
+      teamId: item.teamId,
+      teamName: item.teamName,
+      fromYear: String(item.fromYear),
+      toYear: item.toYear ? String(item.toYear) : "",
+    }));
 
   const selectedSport = draft.sport ?? player?.sport ?? SportType.FOOTBALL;
   const availableTeams = useMemo(
@@ -105,6 +115,17 @@ export default function EditPlayerPage() {
     formData.set("weightKg", draft.weightKg ?? (player.weightKg ? String(player.weightKg) : ""));
     formData.set("status", draft.status ?? player.status);
     formData.set("dominantFoot", draft.dominantFoot ?? player.dominantFoot);
+    formData.set(
+      "clubHistory",
+      JSON.stringify(
+        clubHistoryDraft.map((entry) => ({
+          id: entry.id,
+          teamId: entry.teamId,
+          fromYear: Number(entry.fromYear) || new Date().getFullYear(),
+          toYear: entry.toYear.trim() ? Number(entry.toYear) : null,
+        }))
+      )
+    );
     if (image) formData.set("profileImage", image);
 
     await updatePlayer.mutateAsync(formData);
@@ -309,6 +330,100 @@ export default function EditPlayerPage() {
               ))}
             </Select>
           </FormField>
+          <div className="space-y-2 md:col-span-2">
+            <p className="text-sm font-semibold" style={{ color: "var(--text-secondary)" }}>
+              Istorija klubova
+            </p>
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                onClick={() => {
+                  const currentYear = new Date().getFullYear();
+                  const fallbackTeamId = draft.teamId ?? player.teamId;
+                  const fallbackTeamName =
+                    availableTeams.find((team) => team.id === fallbackTeamId)?.name ?? player.team ?? "Tim";
+                  setDraft((current) => ({
+                    ...current,
+                    clubHistory: [
+                      ...clubHistoryDraft,
+                      {
+                        id: undefined,
+                        teamId: fallbackTeamId,
+                        teamName: fallbackTeamName,
+                        fromYear: String(currentYear),
+                        toYear: "",
+                      },
+                    ],
+                  }));
+                }}
+              >
+                Dodaj klub
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {clubHistoryDraft.map((entry, index) => (
+                <div key={`${entry.id ?? "new"}-${index}`} className="grid gap-2 rounded-lg border p-2 md:grid-cols-[1fr_120px_120px_40px]" style={{ borderColor: "var(--border)" }}>
+                  <Select
+                    value={entry.teamId}
+                    onChange={(event) => {
+                      const nextTeamId = event.currentTarget.value;
+                      const nextTeamName = availableTeams.find((team) => team.id === nextTeamId)?.name ?? entry.teamName;
+                      setDraft((current) => ({
+                        ...current,
+                        clubHistory: clubHistoryDraft.map((item, i) =>
+                          i === index ? { ...item, teamId: nextTeamId, teamName: nextTeamName } : item
+                        ),
+                      }));
+                    }}
+                  >
+                    {availableTeams.map((team) => (
+                      <option key={team.id} value={team.id}>
+                        {team.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <Input
+                    type="number"
+                    min={1900}
+                    max={3000}
+                    value={entry.fromYear}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setDraft((current) => ({
+                        ...current,
+                        clubHistory: clubHistoryDraft.map((item, i) => (i === index ? { ...item, fromYear: value } : item)),
+                      }));
+                    }}
+                  />
+                  <Input
+                    type="number"
+                    min={1900}
+                    max={3000}
+                    placeholder="danas"
+                    value={entry.toYear}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setDraft((current) => ({
+                        ...current,
+                        clubHistory: clubHistoryDraft.map((item, i) => (i === index ? { ...item, toYear: value } : item)),
+                      }));
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      setDraft((current) => ({
+                        ...current,
+                        clubHistory: clubHistoryDraft.filter((_, i) => i !== index),
+                      }));
+                    }}
+                  >
+                    -
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
           <div className="space-y-2 md:col-span-2">
             {player.profileImageUrl ? (
               <div>

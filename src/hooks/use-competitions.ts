@@ -196,6 +196,17 @@ const playersResponse = z.object({
       teamId: z.string(),
       team: z.string(),
       teamProfileImageUrl: z.string().nullable(),
+      clubHistory: z
+        .array(
+          z.object({
+            id: z.string(),
+            teamId: z.string(),
+            teamName: z.string(),
+            fromYear: z.number(),
+            toYear: z.number().nullable(),
+          })
+        )
+        .optional(),
       age: z.number().nullable(),
     })
   ),

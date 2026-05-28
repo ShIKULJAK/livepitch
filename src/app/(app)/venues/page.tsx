@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { GENERATION_PRESETS, getGenerationPreset } from "@/lib/constants/generation-presets";
-import { useCreatePitch, useCreateVenue, useDeletePitch, useDeleteVenue, useUpdatePitch, useUpdateVenue, useVenues } from "@/hooks/use-competitions";
+import { useCreatePitch, useCreateVenue, useDeletePitch, useDeleteVenue, useTeams, useUpdatePitch, useUpdateVenue, useVenues } from "@/hooks/use-competitions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
@@ -46,9 +46,10 @@ export default function VenuesPage() {
   const deleteVenue = useDeleteVenue();
   const updatePitch = useUpdatePitch();
   const deletePitch = useDeletePitch();
+  const teamsQuery = useTeams();
 
   const [draft, setDraft] = useState<PitchDraft>(toDraft());
-  const [venueDraft, setVenueDraft] = useState({ id: "", name: "", city: "", country: "" });
+  const [venueDraft, setVenueDraft] = useState({ id: "", name: "", city: "", country: "", teamId: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedVenueIds, setExpandedVenueIds] = useState<string[]>([]);
 
@@ -121,15 +122,17 @@ export default function VenuesPage() {
         name: venueDraft.name.trim(),
         city: venueDraft.city.trim() || null,
         country: venueDraft.country.trim() || null,
+        teamId: venueDraft.teamId || null,
       });
     } else {
       await createVenue.mutateAsync({
         name: venueDraft.name.trim(),
         city: venueDraft.city.trim() || null,
         country: venueDraft.country.trim() || null,
+        teamId: venueDraft.teamId || null,
       });
     }
-    setVenueDraft({ id: "", name: "", city: "", country: "" });
+    setVenueDraft({ id: "", name: "", city: "", country: "", teamId: "" });
   }
 
   return (
@@ -146,13 +149,16 @@ export default function VenuesPage() {
                   <div>
                     <p className="font-medium">{venue.name}</p>
                     <p className="text-xs" style={{ color: "var(--text-secondary)" }}>{venue.city}, {venue.country}</p>
+                    <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                      Klub: {venue.team?.name ?? "Nije povezano"}
+                    </p>
                     <p className="text-xs" style={{ color: "var(--text-secondary)" }}>Terena: {venue.pitches.length}</p>
                   </div>
                   <div className="flex gap-2">
                     <Button type="button" onClick={() => toggleVenueExpanded(venue.id)}>
                       {expandedVenueIds.includes(venue.id) ? "Sakrij terene" : "Prikaži terene"}
                     </Button>
-                    <Button type="button" onClick={() => setVenueDraft({ id: venue.id, name: venue.name, city: venue.city ?? "", country: venue.country ?? "" })}>
+                    <Button type="button" onClick={() => setVenueDraft({ id: venue.id, name: venue.name, city: venue.city ?? "", country: venue.country ?? "", teamId: venue.teamId ?? "" })}>
                       Edit stadion
                     </Button>
                     <Button type="button" variant="danger" onClick={() => deleteVenue.mutate(venue.id)}>
@@ -239,12 +245,22 @@ export default function VenuesPage() {
                 <Input value={venueDraft.country} onChange={(event) => setVenueDraft((current) => ({ ...current, country: event.target.value }))} />
               </FormField>
             </div>
+            <FormField label="Team / Club">
+              <Select value={venueDraft.teamId} onChange={(event) => setVenueDraft((current) => ({ ...current, teamId: event.currentTarget.value }))}>
+                <option value="">Nije povezano</option>
+                {(teamsQuery.data ?? []).map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
             <div className="flex gap-2">
               <Button type="button" variant="primary" onClick={() => void saveVenue()} disabled={createVenue.isPending || updateVenue.isPending}>
                 {venueDraft.id ? (updateVenue.isPending ? "Čuvanje..." : "Sačuvaj stadion") : (createVenue.isPending ? "Kreiranje..." : "Kreiraj stadion")}
               </Button>
               {venueDraft.id ? (
-                <Button type="button" onClick={() => setVenueDraft({ id: "", name: "", city: "", country: "" })}>
+                <Button type="button" onClick={() => setVenueDraft({ id: "", name: "", city: "", country: "", teamId: "" })}>
                   Otkaži
                 </Button>
               ) : null}

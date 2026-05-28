@@ -158,6 +158,8 @@ const teamsResponse = z.object({
       city: z.string().nullable(),
       country: z.string().nullable(),
       coach: z.string().nullable(),
+      homeVenueId: z.string().nullable().optional(),
+      homeVenueName: z.string().nullable().optional(),
       profileImageUrl: z.string().nullable(),
       competition: z.string().nullable(),
       played: z.number(),
@@ -307,6 +309,8 @@ const venuesResponse = z.object({
       dimensions: z.string().nullable(),
       lighting: z.boolean(),
       accessibility: z.string().nullable(),
+      teamId: z.string().nullable().optional(),
+      team: z.object({ id: z.string(), name: z.string() }).nullable().optional(),
       pitches: z.array(
         z.object({
           id: z.string(),
@@ -709,7 +713,14 @@ export function useCreateCompetition() {
 
       const json = await safeReadJson(response);
       if (!response.ok) {
-        throw new Error((json as { error?: string } | null)?.error ?? "Unable to create competition");
+        const payload = json as { error?: string; issues?: Array<{ path?: Array<string | number>; message?: string }> } | null;
+        const issues = payload?.issues ?? [];
+        const issueMessage = issues.length
+          ? issues
+              .map((issue) => `${(issue.path ?? []).join(".") || "field"}: ${issue.message ?? "Invalid value"}`)
+              .join(" | ")
+          : null;
+        throw new Error(issueMessage ?? payload?.error ?? "Unable to create competition");
       }
 
       return (json as { data: unknown }).data;
@@ -1246,6 +1257,7 @@ export function useCreateVenue() {
       dimensions?: string | null;
       lighting?: boolean;
       accessibility?: string | null;
+      teamId?: string | null;
     }) => {
       const response = await fetch("/api/venues", {
         method: "POST",
@@ -1273,6 +1285,7 @@ export function useUpdateVenue() {
       dimensions?: string | null;
       lighting?: boolean;
       accessibility?: string | null;
+      teamId?: string | null;
     }) => {
       const response = await fetch("/api/venues", {
         method: "PATCH",

@@ -1,10 +1,38 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
+import { prisma } from "@/lib/db/prisma";
 import { canCreateTeams } from "@/lib/permissions";
 import { createTeam as createTeamRecord } from "@/lib/repositories/teams";
 import { ImageProcessingError, processAndStoreProfileImage } from "@/lib/server/image-processing";
-import { listTeams } from "@/lib/server/competitions";
+import { createVenue, listTeams } from "@/lib/server/competitions";
 import { teamInputSchema } from "@/lib/validation/team";
+
+async function resolveHomeVenueId(
+  organizationId: string,
+  params: {
+    homeVenueId?: string | null;
+    newVenueName?: string | null;
+    newVenueCity?: string | null;
+    newVenueCountry?: string | null;
+  }
+) {
+  if (params.homeVenueId) {
+    const existing = await prisma.venue.findFirst({ where: { id: params.homeVenueId, organizationId }, select: { id: true } });
+    if (!existing) throw new Error("Selected stadium not found.");
+    return existing.id;
+  }
+
+  if (params.newVenueName?.trim()) {
+    const created = await createVenue(organizationId, {
+      name: params.newVenueName.trim(),
+      city: params.newVenueCity?.trim() || null,
+      country: params.newVenueCountry?.trim() || null,
+    });
+    return created.id;
+  }
+
+  return null;
+}
 
 export async function GET() {
   const currentUser = await requireAuth();
@@ -39,6 +67,11 @@ export async function POST(request: Request) {
       }
     }
 
+    const homeVenueId = (formData.get("homeVenueId") as string | null)?.trim() || null;
+    const newVenueName = (formData.get("newVenueName") as string | null)?.trim() || null;
+    const newVenueCity = (formData.get("newVenueCity") as string | null)?.trim() || null;
+    const newVenueCountry = (formData.get("newVenueCountry") as string | null)?.trim() || null;
+
     payload = {
       sport: formData.get("sport"),
       name: formData.get("name"),
@@ -47,10 +80,25 @@ export async function POST(request: Request) {
       city: formData.get("city") || null,
       country: formData.get("country") || null,
       coach: formData.get("coach") || null,
+      homeVenueId: await resolveHomeVenueId(currentUser.organizationId, {
+        homeVenueId,
+        newVenueName,
+        newVenueCity,
+        newVenueCountry,
+      }),
       profileImageUrl,
     };
   } else {
-    payload = await request.json();
+    const body = (await request.json()) as Record<string, unknown>;
+    payload = {
+      ...body,
+      homeVenueId: await resolveHomeVenueId(currentUser.organizationId, {
+        homeVenueId: typeof body.homeVenueId === "string" ? body.homeVenueId : null,
+        newVenueName: typeof body.newVenueName === "string" ? body.newVenueName : null,
+        newVenueCity: typeof body.newVenueCity === "string" ? body.newVenueCity : null,
+        newVenueCountry: typeof body.newVenueCountry === "string" ? body.newVenueCountry : null,
+      }),
+    };
   }
 
   const parsed = teamInputSchema.safeParse(payload);
@@ -62,4 +110,3 @@ export async function POST(request: Request) {
   const data = await createTeamRecord(currentUser.organizationId, currentUser.id, parsed.data);
   return NextResponse.json({ data }, { status: 201 });
 }
-

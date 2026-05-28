@@ -209,9 +209,7 @@ export async function listCompetitionSeasons(organizationId: string) {
 function sanitizeCompetitionInput(input: CreateCompetitionInput) {
   const parseDate = (value?: string | null) => (value ? new Date(value) : null);
   const participantTeamIds = Array.from(new Set(input.participantTeamIds ?? []));
-  const normalizedPitchNames = Array.from(
-    new Set((input.pitchNames ?? ["Teren 1"]).map((name) => name.trim()).filter(Boolean))
-  );
+  const normalizedPitchNames = Array.from(new Set((input.pitchNames ?? []).map((name) => name.trim()).filter(Boolean)));
   const normalizedGenerationMatchDurations = Array.from(
     new Map(
       (input.generationMatchDurations ?? [])
@@ -245,9 +243,9 @@ function sanitizeCompetitionInput(input: CreateCompetitionInput) {
     substitutions: input.type === "FRIENDLY_MATCH" ? 5 : input.substitutions ?? null,
     matchDurationMinutes: input.matchDurationMinutes ?? 90,
     generationMatchDurations: normalizedGenerationMatchDurations,
-    stadiumName: input.stadiumName.trim(),
-    pitchNames: normalizedPitchNames.length ? normalizedPitchNames : ["Teren 1"],
-    scheduleDays: (input.scheduleDays ?? []).map((day) => ({
+    stadiumName: input.type === "TOURNAMENT" ? (input.stadiumName?.trim() ?? null) : null,
+    pitchNames: input.type === "TOURNAMENT" ? normalizedPitchNames : [],
+    scheduleDays: (input.type === "TOURNAMENT" ? input.scheduleDays ?? [] : []).map((day) => ({
       dayLabel: day.dayLabel.trim(),
       dayDate: day.dayDate,
       generationLabel: day.generationLabel,
@@ -428,7 +426,7 @@ export async function updateCompetition(id: string, organizationId: string, acto
     matchDurationMinutes: input.matchDurationMinutes ?? current.matchDurationMinutes,
     generationMatchDurations:
       input.generationMatchDurations ?? normalizeGenerationMatchDurations(current.generationMatchDurations),
-    stadiumName: input.stadiumName ?? current.stadiumName ?? "Stadion",
+    stadiumName: input.stadiumName ?? current.stadiumName ?? null,
     pitchNames: input.pitchNames ?? current.pitchNames,
     scheduleDays: input.scheduleDays ?? normalizeScheduleDays(current.scheduleDays),
     format: input.format ?? current.format,
@@ -587,6 +585,7 @@ export async function listTeams(organizationId: string) {
   const teams = await prisma.team.findMany({
     where: { organizationId },
     include: {
+      homeVenue: { select: { id: true, name: true } },
       standings: {
         include: { competition: true },
         orderBy: { updatedAt: "desc" },
@@ -608,6 +607,8 @@ export async function listTeams(organizationId: string) {
       city: team.city,
       country: team.country,
       coach: team.coach,
+      homeVenueId: team.homeVenueId,
+      homeVenueName: team.homeVenue?.name ?? null,
       profileImageUrl: team.profileImageUrl,
       competition: standing?.competition.name ?? null,
       played: standing?.played ?? 0,
@@ -910,6 +911,7 @@ export async function listVenues(organizationId: string) {
   return prisma.venue.findMany({
     where: { organizationId },
     include: {
+      team: { select: { id: true, name: true } },
       pitches: {
         where: { isActive: true },
         orderBy: [{ venueId: "asc" }, { name: "asc" }],
@@ -930,6 +932,7 @@ export async function createVenue(
     dimensions?: string | null;
     lighting?: boolean;
     accessibility?: string | null;
+    teamId?: string | null;
   }
 ) {
   return prisma.venue.create({
@@ -943,6 +946,7 @@ export async function createVenue(
       dimensions: input.dimensions ?? null,
       lighting: input.lighting ?? true,
       accessibility: input.accessibility ?? null,
+      teamId: input.teamId ?? null,
       status: "active",
     },
   });
@@ -960,6 +964,7 @@ export async function updateVenue(
     dimensions?: string | null;
     lighting?: boolean;
     accessibility?: string | null;
+    teamId?: string | null;
   }
 ) {
   const existing = await prisma.venue.findFirst({ where: { id: venueId, organizationId }, select: { id: true } });
@@ -975,6 +980,7 @@ export async function updateVenue(
       ...(input.dimensions !== undefined ? { dimensions: input.dimensions } : {}),
       ...(input.lighting !== undefined ? { lighting: input.lighting } : {}),
       ...(input.accessibility !== undefined ? { accessibility: input.accessibility } : {}),
+      ...(input.teamId !== undefined ? { teamId: input.teamId } : {}),
     },
   });
 }

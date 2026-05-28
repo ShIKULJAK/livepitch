@@ -9,4 +9,5 @@ export const venueCreateSchema = z.object({
   dimensions: z.string().trim().max(80).optional().nullable(),
   lighting: z.boolean().optional(),
   accessibility: z.string().trim().max(160).optional().nullable(),
+  teamId: z.string().trim().min(1).optional().nullable(),
 });

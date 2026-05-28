@@ -9,6 +9,7 @@ export const teamInputSchema = z.object({
   city: z.string().trim().min(1).max(120),
   country: z.string().trim().min(1).max(120),
   coach: z.string().trim().min(1).max(120),
+  homeVenueId: z.string().trim().min(1).optional().nullable(),
   profileImageUrl: z.string().max(512).optional().nullable(),
 });
 

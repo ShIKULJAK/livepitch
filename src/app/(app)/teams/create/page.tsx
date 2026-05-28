@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SportType } from "@prisma/client";
-import { useCreateTeam } from "@/hooks/use-competitions";
+import { useCreateTeam, useVenues } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { countryFlag, COUNTRY_OPTIONS } from "@/lib/constants/countries";
 import { SPORT_OPTIONS } from "@/lib/constants/sports";
@@ -19,6 +19,7 @@ export default function CreateTeamPage() {
   const router = useRouter();
   const { user } = useCurrentUser();
   const createTeam = useCreateTeam();
+  const venuesQuery = useVenues();
   const canCreate = canManageTeams(user?.role);
 
   const [sport, setSport] = useState<SportType>(SportType.FOOTBALL);
@@ -28,6 +29,10 @@ export default function CreateTeamPage() {
   const [city, setCity] = useState("");
   const [country, setCountry] = useState("");
   const [coach, setCoach] = useState("");
+  const [homeVenueId, setHomeVenueId] = useState("");
+  const [newVenueName, setNewVenueName] = useState("");
+  const [newVenueCity, setNewVenueCity] = useState("");
+  const [newVenueCountry, setNewVenueCountry] = useState("");
   const [image, setImage] = useState<File | null>(null);
 
   const countryByName = useMemo(() => new Map(COUNTRY_OPTIONS.map((option) => [option.name.toLowerCase(), option])), []);
@@ -43,6 +48,12 @@ export default function CreateTeamPage() {
     formData.set("city", city);
     formData.set("country", country);
     formData.set("coach", coach);
+    if (homeVenueId) formData.set("homeVenueId", homeVenueId);
+    if (!homeVenueId && newVenueName.trim()) {
+      formData.set("newVenueName", newVenueName.trim());
+      formData.set("newVenueCity", newVenueCity.trim());
+      formData.set("newVenueCountry", newVenueCountry.trim());
+    }
     if (image) formData.set("profileImage", image);
 
     await createTeam.mutateAsync(formData);
@@ -105,6 +116,29 @@ export default function CreateTeamPage() {
           <FormField label="Coach" tooltip="Head coach or manager of this team." required>
             <Input placeholder="Coach" value={coach} onChange={(event) => setCoach(event.currentTarget.value)} required />
           </FormField>
+          <FormField label="Stadium" tooltip="Home stadium for league home matches.">
+            <Select value={homeVenueId} onChange={(event) => setHomeVenueId(event.currentTarget.value)}>
+              <option value="">No stadium selected</option>
+              {(venuesQuery.data ?? []).map((venue) => (
+                <option key={venue.id} value={venue.id}>
+                  {venue.name}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          {!homeVenueId ? (
+            <div className="grid gap-3 md:col-span-2 md:grid-cols-3">
+              <FormField label="Novi stadion" tooltip="Create and link a new stadium for this team.">
+                <Input placeholder="Naziv stadiona" value={newVenueName} onChange={(event) => setNewVenueName(event.currentTarget.value)} />
+              </FormField>
+              <FormField label="Grad stadiona">
+                <Input placeholder="Grad" value={newVenueCity} onChange={(event) => setNewVenueCity(event.currentTarget.value)} />
+              </FormField>
+              <FormField label="Država stadiona">
+                <Input placeholder="Država" value={newVenueCountry} onChange={(event) => setNewVenueCountry(event.currentTarget.value)} />
+              </FormField>
+            </div>
+          ) : null}
           <FormField label="Team Profile Image" tooltip="Upload PNG/JPG/WEBP. Image is auto-resized to 150x150 and compressed to <=300KB.">
             <Input
               type="file"

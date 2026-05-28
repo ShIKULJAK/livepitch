@@ -115,7 +115,7 @@ async function syncDrawKnockoutProgress(
 async function assertCompetitionOwnership(organizationId: string, competitionId: string) {
   return prisma.competition.findFirst({
     where: { id: competitionId, organizationId },
-    select: { id: true, seasonId: true, matchDurationMinutes: true, createdById: true, stadiumName: true, pitchNames: true },
+    select: { id: true, type: true, seasonId: true, matchDurationMinutes: true, createdById: true, stadiumName: true, pitchNames: true },
   });
 }
 
@@ -141,7 +141,7 @@ async function resolveCompetitionForCreate(organizationId: string, competitionId
       sport: homeTeam.sport,
       name: "Friendly Game",
     },
-    select: { id: true, seasonId: true, matchDurationMinutes: true, stadiumName: true, pitchNames: true },
+    select: { id: true, type: true, seasonId: true, matchDurationMinutes: true, stadiumName: true, pitchNames: true },
   });
 
   if (existingFriendlyCompetition) return existingFriendlyCompetition;
@@ -158,14 +158,27 @@ async function resolveCompetitionForCreate(organizationId: string, competitionId
       matchDurationMinutes: 90,
       visibility: "public",
     },
-    select: { id: true, seasonId: true, matchDurationMinutes: true, stadiumName: true, pitchNames: true },
+    select: { id: true, type: true, seasonId: true, matchDurationMinutes: true, stadiumName: true, pitchNames: true },
   });
 }
 
 export async function createMatch(organizationId: string, actorId: string, input: MatchInput) {
   const competition = await resolveCompetitionForCreate(organizationId, input.competitionId, input.homeTeamId, actorId);
+  const homeTeamVenue =
+    competition.type === "LEAGUE"
+      ? await prisma.team.findFirst({
+          where: { id: input.homeTeamId, organizationId },
+          include: { homeVenue: true },
+        })
+      : null;
   const defaultPitch = competition.pitchNames?.[0] ?? "Teren 1";
-  const venueLabel = input.venueLabel ?? (competition.stadiumName ? `${competition.stadiumName} - ${input.pitchName ?? defaultPitch}` : null);
+  const leagueVenueName = homeTeamVenue?.homeVenue?.name ?? null;
+  const pitchName = input.pitchName ?? defaultPitch;
+  const venueLabel =
+    input.venueLabel ??
+    (competition.type === "LEAGUE"
+      ? (leagueVenueName ? `${leagueVenueName} - ${pitchName}` : null)
+      : (competition.stadiumName ? `${competition.stadiumName} - ${pitchName}` : null));
 
   return prisma.match.create({
     data: {
@@ -173,8 +186,8 @@ export async function createMatch(organizationId: string, actorId: string, input
       seasonId: competition.seasonId ?? null,
       homeTeamId: input.homeTeamId,
       awayTeamId: input.awayTeamId,
-      venueId: input.venueId ?? null,
-      pitchName: input.pitchName ?? defaultPitch,
+      venueId: competition.type === "LEAGUE" ? (homeTeamVenue?.homeVenueId ?? input.venueId ?? null) : (input.venueId ?? null),
+      pitchName,
       venueLabel,
       round: input.round ?? null,
       scheduledAt: new Date(input.scheduledAt),

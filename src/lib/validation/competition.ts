@@ -53,9 +53,9 @@ const competitionBaseSchema = z.object({
   substitutions: z.number().int().min(0).max(12).optional().nullable(),
   matchDurationMinutes: z.number().int().min(1).max(240),
   generationMatchDurations: z.array(generationDurationSchema).max(20).default([]),
-  stadiumName: z.string().trim().min(2).max(120),
-  pitchNames: z.array(z.string().trim().min(1).max(80)).min(1).max(16),
-  scheduleDays: z.array(scheduleDaySchema).min(1).max(30),
+  stadiumName: z.string().trim().max(120).optional().nullable(),
+  pitchNames: z.array(z.string().trim().min(1).max(80)).max(16).default([]),
+  scheduleDays: z.array(scheduleDaySchema).max(30).default([]),
   format: z.string().max(120).optional().nullable(),
   visibility: z.string().max(40).optional().nullable(),
   status: z.nativeEnum(CompetitionStatus).default(CompetitionStatus.DRAFT),
@@ -72,6 +72,31 @@ const competitionBaseSchema = z.object({
 });
 
 export const createCompetitionSchema = competitionBaseSchema.superRefine((value, ctx) => {
+  if (value.type === CompetitionType.TOURNAMENT) {
+    if (!value.stadiumName || value.stadiumName.trim().length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["stadiumName"],
+        message: "Stadium is required for tournaments.",
+      });
+    }
+    if (!value.pitchNames.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pitchNames"],
+        message: "At least one pitch is required for tournaments.",
+      });
+    }
+    if (!value.scheduleDays.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["scheduleDays"],
+        message: "At least one schedule day is required for tournaments.",
+      });
+    }
+  }
+
+  if (!value.pitchNames.length) return;
   const normalized = value.pitchNames.map((name) => name.trim().toLowerCase());
   if (new Set(normalized).size !== normalized.length) {
     ctx.addIssue({
@@ -83,7 +108,23 @@ export const createCompetitionSchema = competitionBaseSchema.superRefine((value,
 });
 
 export const updateCompetitionSchema = competitionBaseSchema.partial().superRefine((value, ctx) => {
-  if (!value.pitchNames) return;
+  if (value.type === CompetitionType.TOURNAMENT) {
+    if (value.stadiumName !== undefined && (!value.stadiumName || value.stadiumName.trim().length < 2)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["stadiumName"],
+        message: "Stadium is required for tournaments.",
+      });
+    }
+    if (value.pitchNames !== undefined && !value.pitchNames.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pitchNames"],
+        message: "At least one pitch is required for tournaments.",
+      });
+    }
+  }
+  if (!value.pitchNames?.length) return;
   const normalized = value.pitchNames.map((name) => name.trim().toLowerCase());
   if (new Set(normalized).size !== normalized.length) {
     ctx.addIssue({

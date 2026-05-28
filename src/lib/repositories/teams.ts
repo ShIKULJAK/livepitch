@@ -18,6 +18,7 @@ export async function createTeam(organizationId: string, createdById: string, in
       city: input.city ?? null,
       country: input.country ?? null,
       coach: input.coach ?? null,
+      homeVenueId: input.homeVenueId ?? null,
       profileImageUrl: input.profileImageUrl ?? null,
     },
   });
@@ -43,6 +44,7 @@ export async function updateTeam(
       ...(input.city !== undefined ? { city: input.city } : {}),
       ...(input.country !== undefined ? { country: input.country } : {}),
       ...(input.coach !== undefined ? { coach: input.coach } : {}),
+      ...(input.homeVenueId !== undefined ? { homeVenueId: input.homeVenueId } : {}),
       ...(input.profileImageUrl !== undefined ? { profileImageUrl: input.profileImageUrl } : {}),
     },
   });

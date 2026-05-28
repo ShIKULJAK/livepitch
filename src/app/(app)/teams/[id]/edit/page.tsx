@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { SportType } from "@prisma/client";
-import { useTeams, useUpdateTeam } from "@/hooks/use-competitions";
+import { useTeams, useUpdateTeam, useVenues } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { SPORT_OPTIONS } from "@/lib/constants/sports";
 import { canCreateTeams, canEditEntity } from "@/lib/permissions";
@@ -21,6 +21,7 @@ export default function EditTeamPage() {
   const { user } = useCurrentUser();
   const teamsQuery = useTeams();
   const updateTeam = useUpdateTeam(params.id);
+  const venuesQuery = useVenues();
   const canEditByRole = canCreateTeams(user?.role);
 
   const team = (teamsQuery.data ?? []).find((item) => item.id === params.id);
@@ -34,8 +35,12 @@ export default function EditTeamPage() {
     city?: string;
     country?: string;
     coach?: string;
+    homeVenueId?: string | null;
   }>({});
   const [image, setImage] = useState<File | null>(null);
+  const [newVenueName, setNewVenueName] = useState("");
+  const [newVenueCity, setNewVenueCity] = useState("");
+  const [newVenueCountry, setNewVenueCountry] = useState("");
   const imagePreviewUrl = useMemo(() => (image ? URL.createObjectURL(image) : null), [image]);
 
   useEffect(() => {
@@ -55,6 +60,14 @@ export default function EditTeamPage() {
     formData.set("city", draft.city ?? team.city ?? "");
     formData.set("country", draft.country ?? team.country ?? "");
     formData.set("coach", draft.coach ?? team.coach ?? "");
+    const selectedHomeVenueId = draft.homeVenueId ?? team.homeVenueId ?? "";
+    if (selectedHomeVenueId) {
+      formData.set("homeVenueId", selectedHomeVenueId);
+    } else if (newVenueName.trim()) {
+      formData.set("newVenueName", newVenueName.trim());
+      formData.set("newVenueCity", newVenueCity.trim());
+      formData.set("newVenueCountry", newVenueCountry.trim());
+    }
     if (image) formData.set("profileImage", image);
 
     await updateTeam.mutateAsync(formData);
@@ -111,6 +124,29 @@ export default function EditTeamPage() {
           <FormField label="Coach" tooltip="Head coach of the team." required>
             <Input value={draft.coach ?? team.coach ?? ""} onChange={(event) => setDraft((current) => ({ ...current, coach: event.target.value }))} required />
           </FormField>
+          <FormField label="Stadium" tooltip="Home stadium for league home matches.">
+            <Select value={draft.homeVenueId ?? team.homeVenueId ?? ""} onChange={(event) => setDraft((current) => ({ ...current, homeVenueId: event.currentTarget.value || null }))}>
+              <option value="">No stadium selected</option>
+              {(venuesQuery.data ?? []).map((venue) => (
+                <option key={venue.id} value={venue.id}>
+                  {venue.name}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          {!(draft.homeVenueId ?? team.homeVenueId) ? (
+            <div className="grid gap-3 md:col-span-2 md:grid-cols-3">
+              <FormField label="Novi stadion">
+                <Input placeholder="Naziv stadiona" value={newVenueName} onChange={(event) => setNewVenueName(event.currentTarget.value)} />
+              </FormField>
+              <FormField label="Grad stadiona">
+                <Input placeholder="Grad" value={newVenueCity} onChange={(event) => setNewVenueCity(event.currentTarget.value)} />
+              </FormField>
+              <FormField label="Država stadiona">
+                <Input placeholder="Država" value={newVenueCountry} onChange={(event) => setNewVenueCountry(event.currentTarget.value)} />
+              </FormField>
+            </div>
+          ) : null}
           <div className="space-y-2 md:col-span-2">
             {team.profileImageUrl ? (
               <div>

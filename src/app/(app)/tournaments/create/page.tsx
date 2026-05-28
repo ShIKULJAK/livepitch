@@ -91,7 +91,7 @@ function normalizePitchNameForStorage(rawPitch: string, fallbackPitchName: strin
   return value;
 }
 
-function decodeStadiumBlocks(stadiumName?: string, pitchNames?: string[]): StadiumBlock[] {
+function decodeStadiumBlocks(stadiumName?: string | null, pitchNames?: string[]): StadiumBlock[] {
   const blocksMap = new Map<string, string[]>();
   const fallbackStadium = stadiumName || "Stadion 1";
   const rawPitches = pitchNames?.length ? pitchNames : ["Teren 1"];
@@ -250,21 +250,24 @@ export default function CreateTournamentPage() {
   const onSubmit = form.handleSubmit(
     async (values) => {
       setFormError(null);
+      const derivedTournamentPitchNames = Array.from(
+        new Set(
+          filteredPitchOptions
+            .map((item) => `${item.venueName} - ${item.pitchName}`)
+            .concat(selectedPrimaryPitchName && primaryVenue ? [`${primaryVenue.name} - ${selectedPrimaryPitchName}`] : [])
+            .filter(Boolean)
+        )
+      );
+      const fallbackTournamentPitchNames = (values.pitchNames ?? []).filter((item) => item.trim().length > 0);
+
       const payload = createCompetitionSchema.parse({
         ...values,
-        stadiumName: primaryVenue?.name ?? values.stadiumName,
-        pitchNames: Array.from(
-          new Set(
-            filteredPitchOptions
-              .map((item) => `${item.venueName} - ${item.pitchName}`)
-              .concat(
-                selectedPrimaryPitchName && primaryVenue
-                  ? [`${primaryVenue.name} - ${selectedPrimaryPitchName}`]
-                  : []
-              )
-              .filter(Boolean)
-          )
-        ),
+        stadiumName:
+          values.type === CompetitionType.LEAGUE ? null : (primaryVenue?.name ?? values.stadiumName ?? "Stadion"),
+        pitchNames:
+          values.type === CompetitionType.LEAGUE
+            ? []
+            : (derivedTournamentPitchNames.length ? derivedTournamentPitchNames : fallbackTournamentPitchNames),
         startDate: toIsoDate(values.startDateInput),
         endDate: toIsoDate(values.endDateInput),
         registrationDeadline: toIsoDate(values.registrationDeadlineInput),
@@ -374,6 +377,8 @@ export default function CreateTournamentPage() {
               <FormField label="End Date" tooltip="Competition expected end date.">
                 <Input type="date" {...form.register("endDateInput")} />
               </FormField>
+              {competitionType !== CompetitionType.LEAGUE ? (
+              <>
               <FormField label="Stadion" tooltip="Glavni stadion za takmičenje." required>
                 <Select
                   value={selectedVenueIds[0] ?? ""}
@@ -440,6 +445,8 @@ export default function CreateTournamentPage() {
                   </div>
                 </FormField>
               </div>
+              </>
+              ) : null}
               <div className="space-y-2" style={{ display: "none" }}>
                 <FormField
                   label="Stadioni i tereni"
@@ -524,28 +531,30 @@ export default function CreateTournamentPage() {
                   </div>
                 </FormField>
               </div>
-              <div className="space-y-2 md:col-span-2">
-                <FormField label="Participants" tooltip="Select existing teams for the chosen sport. These teams become official competition participants.">
-                  <Input placeholder="Search teams..." value={teamSearch} onChange={(event) => setTeamSearch(event.currentTarget.value)} />
-                </FormField>
-                <div className="max-h-44 space-y-1 overflow-auto rounded-xl border p-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
-                  {availableTeams.map((team) => (
-                    <label key={team.id} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm">
-                      <span>{team.name}</span>
-                      <input
-                        type="checkbox"
-                        checked={participantTeamIds.includes(team.id)}
-                        onChange={() => toggleParticipant(team.id)}
-                      />
-                    </label>
-                  ))}
-                  {!availableTeams.length ? (
-                    <p className="px-2 py-1 text-xs" style={{ color: "var(--text-secondary)" }}>
-                      No teams available for selected sport.
-                    </p>
-                  ) : null}
+              {competitionType === CompetitionType.LEAGUE ? (
+                <div className="space-y-2 md:col-span-2">
+                  <FormField label="Participants" tooltip="Select existing teams for the chosen sport. These teams become official competition participants.">
+                    <Input placeholder="Search teams..." value={teamSearch} onChange={(event) => setTeamSearch(event.currentTarget.value)} />
+                  </FormField>
+                  <div className="max-h-44 space-y-1 overflow-auto rounded-xl border p-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
+                    {availableTeams.map((team) => (
+                      <label key={team.id} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm">
+                        <span>{team.name}</span>
+                        <input
+                          type="checkbox"
+                          checked={participantTeamIds.includes(team.id)}
+                          onChange={() => toggleParticipant(team.id)}
+                        />
+                      </label>
+                    ))}
+                    {!availableTeams.length ? (
+                      <p className="px-2 py-1 text-xs" style={{ color: "var(--text-secondary)" }}>
+                        No teams available for selected sport.
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
+              ) : null}
             </div>
           )}
 

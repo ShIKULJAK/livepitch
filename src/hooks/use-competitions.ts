@@ -550,6 +550,13 @@ const teamApplicationCompetitionListResponse = z.object({
       sport: z.nativeEnum(SportType),
       startDate: z.string().datetime().nullable(),
       endDate: z.string().datetime().nullable(),
+      seasonOptions: z.array(
+        z.object({
+          competitionId: z.string(),
+          seasonId: z.string().nullable(),
+          seasonLabel: z.string().nullable(),
+        })
+      ),
     })
   ),
 });

@@ -7,10 +7,12 @@ export async function listApplicableCompetitions(
   organizationId: string,
   filters: { q?: string; type?: "TOURNAMENT" | "LEAGUE" | "FRIENDLY_MATCH"; sport?: "FOOTBALL" | "BASKETBALL" | "HANDBALL" | "VOLLEYBALL" }
 ) {
+  const now = new Date();
   const competitions = await prisma.competition.findMany({
     where: {
       organizationId,
       status: { in: [CompetitionStatus.DRAFT, CompetitionStatus.UPCOMING] },
+      OR: [{ endDate: null }, { endDate: { gte: now } }],
       ...(filters.q
         ? {
             OR: [
@@ -26,15 +28,49 @@ export async function listApplicableCompetitions(
     orderBy: [{ createdAt: "desc" }],
   });
 
-  return competitions.map((competition) => ({
-    id: competition.id,
-    name: competition.name,
-    type: competition.type,
-    status: competition.status,
-    seasonLabel: competition.season?.name ?? null,
-    sport: competition.sport,
-    startDate: competition.startDate,
-    endDate: competition.endDate,
+  const grouped = new Map<
+    string,
+    {
+      id: string;
+      name: string;
+      type: typeof competitions[number]["type"];
+      status: typeof competitions[number]["status"];
+      sport: typeof competitions[number]["sport"];
+      startDate: Date | null;
+      endDate: Date | null;
+      seasonLabel: string | null;
+      seasonOptions: Array<{ competitionId: string; seasonId: string | null; seasonLabel: string | null }>;
+    }
+  >();
+
+  for (const competition of competitions) {
+    const key = `${competition.name}__${competition.type}__${competition.sport}`;
+    const option = {
+      competitionId: competition.id,
+      seasonId: competition.seasonId,
+      seasonLabel: competition.season?.name ?? null,
+    };
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, {
+        id: competition.id,
+        name: competition.name,
+        type: competition.type,
+        status: competition.status,
+        seasonLabel: competition.season?.name ?? null,
+        sport: competition.sport,
+        startDate: competition.startDate,
+        endDate: competition.endDate,
+        seasonOptions: [option],
+      });
+      continue;
+    }
+    existing.seasonOptions.push(option);
+  }
+
+  return Array.from(grouped.values()).map((entry) => ({
+    ...entry,
+    seasonOptions: entry.seasonOptions.sort((a, b) => (b.seasonLabel ?? "").localeCompare(a.seasonLabel ?? "")),
   }));
 }
 

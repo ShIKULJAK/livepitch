@@ -13,7 +13,7 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useCreateCompetition, useTeams, useVenues } from "@/hooks/use-competitions";
+import { useCompetitions, useCreateCompetition, useTeams, useVenues } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { createCompetitionSchema } from "@/lib/validation/competition";
 import { useI18n } from "@/lib/i18n";
@@ -136,6 +136,7 @@ export default function CreateTournamentPage() {
   const [step, setStep] = useState(0);
   const [formError, setFormError] = useState<string | null>(null);
   const createCompetition = useCreateCompetition();
+  const templatesQuery = useCompetitions({});
   const teamsQuery = useTeams();
   const venuesQuery = useVenues();
   const generationOptions = GENERATION_LABELS;
@@ -143,6 +144,7 @@ export default function CreateTournamentPage() {
   const [stadiumBlocks, setStadiumBlocks] = useState<StadiumBlock[]>(() => decodeStadiumBlocks(defaults.stadiumName, defaults.pitchNames));
   const [selectedVenueIds, setSelectedVenueIds] = useState<string[]>([]);
   const [selectedPrimaryPitchName, setSelectedPrimaryPitchName] = useState<string>("");
+  const [selectedTemplateCompetitionId, setSelectedTemplateCompetitionId] = useState<string>("");
 
   const form = useForm<CompetitionFormValues>({
     resolver: zodResolver(createCompetitionSchema.extend({
@@ -233,6 +235,40 @@ export default function CreateTournamentPage() {
     ["Pitches", pitchNames.join(", ")],
                     ["Schedule Days", scheduleDays.map((d) => `${d.dayDate} · ${d.generationLabel} · ${d.startTime}-${d.endTime}`).join(" | ")],
   ];
+
+  const templateOptions = useMemo(() => {
+    const grouped = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        type: CompetitionType;
+        sport: SportType;
+        seasonLabel?: string | null;
+        status: CompetitionStatus;
+        location: string;
+        format?: string | null;
+        matchDurationMinutes: number;
+        generationMatchDurations?: Array<{ generationLabel: string; matchDurationMinutes: number }>;
+        stadiumName?: string | null;
+        pitchNames?: string[];
+        scheduleDays?: Array<{
+          dayLabel: string;
+          dayDate?: string;
+          generationLabel?: string;
+          stageScope?: "ALL" | "GROUP_STAGE" | "KNOCKOUT";
+          pitchId?: string | null;
+          startTime: string;
+          endTime: string;
+        }> | null;
+      }
+    >();
+    for (const competition of templatesQuery.data ?? []) {
+      const key = `${competition.name}__${competition.type}__${competition.sport}`;
+      if (!grouped.has(key)) grouped.set(key, competition);
+    }
+    return Array.from(grouped.values());
+  }, [templatesQuery.data]);
 
   function toggleParticipant(teamId: string) {
     const current = form.getValues("participantTeamIds") ?? [];
@@ -336,6 +372,63 @@ export default function CreateTournamentPage() {
         <form className="space-y-4" onSubmit={onSubmit}>
           {step === 0 && (
             <div className="grid gap-3 md:grid-cols-2">
+              <FormField label="Kopiraj iz postojećeg takmičenja" tooltip="Izaberite ranije takmičenje kao template.">
+                <Select
+                  value={selectedTemplateCompetitionId}
+                  onChange={(event) => {
+                    const templateId = event.currentTarget.value;
+                    setSelectedTemplateCompetitionId(templateId);
+                    if (!templateId) return;
+                    const template = (templatesQuery.data ?? []).find((item) => item.id === templateId);
+                    if (!template) return;
+
+                    form.setValue("name", template.name, { shouldDirty: true });
+                    form.setValue("type", template.type, { shouldDirty: true });
+                    form.setValue("sport", template.sport, { shouldDirty: true });
+                    form.setValue("location", template.location === "TBD" ? "" : template.location, { shouldDirty: true });
+                    form.setValue("status", template.status, { shouldDirty: true });
+                    form.setValue("matchDurationMinutes", template.matchDurationMinutes, { shouldDirty: true });
+                    form.setValue("generationMatchDurations", template.generationMatchDurations ?? [], { shouldDirty: true });
+                    form.setValue("stadiumName", template.stadiumName ?? "Stadion", { shouldDirty: true });
+                    form.setValue("pitchNames", template.pitchNames?.length ? template.pitchNames : ["Teren 1"], { shouldDirty: true });
+
+                    if (template.scheduleDays?.length) {
+                      form.setValue("scheduleDays", template.scheduleDays.map((day, index) => ({
+                        dayLabel: day.dayLabel || `Dan ${index + 1}`,
+                        dayDate: day.dayDate ?? new Date().toISOString().slice(0, 10),
+                        generationLabel: day.generationLabel ?? ALL_GENERATIONS_LABEL,
+                        stageScope: day.stageScope ?? "ALL",
+                        pitchId: day.pitchId ?? null,
+                        startTime: day.startTime,
+                        endTime: day.endTime,
+                      })), { shouldDirty: true });
+                    }
+
+                    if (template.pitchNames?.length && venuesQuery.data?.length) {
+                      const resolvedVenueIds = Array.from(
+                        new Set(
+                          template.pitchNames
+                            .map((name) => {
+                              const venueName = name.split(" - ")[0]?.trim();
+                              if (!venueName) return null;
+                              return venuesQuery.data.find((venue) => venue.name === venueName)?.id ?? null;
+                            })
+                            .filter((id): id is string => Boolean(id))
+                        )
+                      );
+                      if (resolvedVenueIds.length) setSelectedVenueIds(resolvedVenueIds);
+                    }
+                  }}
+                >
+                  <option value="">Bez template-a</option>
+                  {templateOptions.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} • {item.type} • {item.seasonLabel ?? "N/A"}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <div />
               <FormField
                 label="Competition Name"
                 tooltip="Official competition title shown across matches, standings, and exports."

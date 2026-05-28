@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
+import { Select } from "@/components/ui/select";
 
 export default function DrawsPage() {
   const seasonsQuery = useCompetitionSeasons();
@@ -26,6 +27,18 @@ export default function DrawsPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Izvlacenje" description="Manage group draws and knockout bracket generation for competitions." />
+      <Card className="p-3">
+        <div className="max-w-xs">
+          <Select value={seasonYear} onChange={(event) => setSeasonYear(event.currentTarget.value)}>
+            <option value="ALL">Sve sezone</option>
+            {seasonsQuery.data?.years.map((item) => (
+              <option key={item.year} value={item.year}>
+                {item.year}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </Card>
 
       {drawCompetitionsQuery.isLoading ? (
         <>

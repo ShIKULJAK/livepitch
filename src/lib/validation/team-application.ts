@@ -54,6 +54,14 @@ export const teamApplicationInputSchema = z.object({
       continue;
     }
     playersByYear.set(player.generationYear, (playersByYear.get(player.generationYear) ?? 0) + 1);
+    const youngestAllowed = player.generationYear + 2;
+    if (player.birthYear < player.generationYear || player.birthYear > youngestAllowed) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["players"],
+        message: `Igrač za generaciju ${player.generationYear} može biti samo godište ${player.generationYear}, ${player.generationYear + 1} ili ${youngestAllowed}.`,
+      });
+    }
   }
 
 });

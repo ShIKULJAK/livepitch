@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCompetition, useCompetitionDraw, useGenerateDraw, useResetDraw, useSwapDrawPitches, useSwapDrawTeams, useUpdateCompetition, useVenues } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { canCreateDraws } from "@/lib/permissions";
@@ -56,6 +56,7 @@ function TeamMark({ name, imageUrl }: { name: string; imageUrl?: string | null }
 
 export default function CompetitionDrawPage() {
   const params = useParams<{ competitionId: string }>();
+  const router = useRouter();
   const { user } = useCurrentUser();
   const canManageByRole = canCreateDraws(user?.role);
   const [selectedGenerationYear, setSelectedGenerationYear] = useState<number | null>(null);
@@ -320,7 +321,11 @@ export default function CompetitionDrawPage() {
   }
 
   const { competition, draw } = drawQuery.data;
-  const canManage = canManageByRole && Boolean(drawQuery.data.canManage);
+  const hasEndedByDate = competitionDetailsQuery.data?.endDate ? new Date(competitionDetailsQuery.data.endDate).getTime() < Date.now() : false;
+  const hasEndedByStatus =
+    competitionDetailsQuery.data?.status === "COMPLETED" || competitionDetailsQuery.data?.status === "ARCHIVED";
+  const isDrawLocked = hasEndedByDate || hasEndedByStatus;
+  const canManage = canManageByRole && Boolean(drawQuery.data.canManage) && !isDrawLocked;
   const isTournament = competition.type === "TOURNAMENT";
 
   const currentConfig = {
@@ -658,6 +663,26 @@ export default function CompetitionDrawPage() {
   return (
     <div className="space-y-4">
       <PageHeader title={`Izvlacenje - ${competition.name}`} description={`Season: ${competition.seasonLabel ?? "N/A"} - Participants: ${competition.participants.length} - Match duration: ${competition.matchDurationMinutes} min`} />
+      {competitionDetailsQuery.data?.seasonOptions?.length ? (
+        <Card className="p-3">
+          <div className="max-w-xs">
+            <FormField label="Sezona">
+              <Select value={competitionDetailsQuery.data.id} onChange={(event) => router.push(`/draws/${event.currentTarget.value}`)}>
+                {competitionDetailsQuery.data.seasonOptions.map((option) => (
+                  <option key={option.competitionId} value={option.competitionId}>
+                    {option.seasonLabel ?? "No season"}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </div>
+        </Card>
+      ) : null}
+      {isDrawLocked ? (
+        <Card className="p-3 text-sm" style={{ color: "var(--warning)" }}>
+          Turnir je završen. Podešavanja žrijeba su zaključana za ovu sezonu.
+        </Card>
+      ) : null}
 
       <Card className="space-y-3 p-5">
         <h3 className="text-lg font-semibold">Participants</h3>
@@ -739,6 +764,7 @@ export default function CompetitionDrawPage() {
           style={{
             opacity: isGenerationSwitching ? 0.35 : 1,
             transform: isGenerationSwitching ? "translateX(8px)" : "translateX(0)",
+            pointerEvents: canManage ? "auto" : "none",
             transition: "opacity 220ms ease, transform 220ms ease",
           }}
         >

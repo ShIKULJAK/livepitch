@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useCompetitions, usePlayers, useSubmitTeamApplication, useTeams } from "@/hooks/use-competitions";
+import { useCompetitions, usePlayers, useSubmitTeamApplication, useTeamApplications, useTeams } from "@/hooks/use-competitions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -17,6 +17,10 @@ function toDateInput(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+function allowedBirthYearsForGeneration(generationYear: number) {
+  return [generationYear, generationYear + 1, generationYear + 2];
+}
+
 export default function TeamApplicationFormPage() {
   const params = useParams<{ competitionId: string }>();
   const router = useRouter();
@@ -26,6 +30,11 @@ export default function TeamApplicationFormPage() {
   const submit = useSubmitTeamApplication();
 
   const competition = (competitionsQuery.data ?? []).find((item) => item.id === params.competitionId);
+  const applicationsQuery = useTeamApplications(params.competitionId);
+  const seasonOptions = applicationsQuery.data?.seasonOptions ?? [];
+  const [selectedCompetitionId, setSelectedCompetitionId] = useState<string>(params.competitionId);
+  const selectedCompetition =
+    (competitionsQuery.data ?? []).find((item) => item.id === selectedCompetitionId) ?? competition;
   const currentYear = new Date().getFullYear();
   const years = useMemo(
     () => Array.from({ length: 14 }, (_, index) => currentYear - 5 - index),
@@ -42,18 +51,24 @@ export default function TeamApplicationFormPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!applicationsQuery.data?.defaultSeasonCompetitionId) return;
+    setSelectedCompetitionId(applicationsQuery.data.defaultSeasonCompetitionId);
+  }, [applicationsQuery.data?.defaultSeasonCompetitionId]);
+
   function getTeamPlayersForGeneration(selectedTeamId: string, year: number): PlayerRow[] {
+    const allowedBirthYears = new Set(allowedBirthYearsForGeneration(year));
     const fromDb = (playersQuery.data ?? []).filter((player) => {
       if (player.teamId !== selectedTeamId) return false;
       if (!player.dateOfBirth) return false;
-      return new Date(player.dateOfBirth).getFullYear() === year;
+      return allowedBirthYears.has(new Date(player.dateOfBirth).getFullYear());
     });
 
     if (!fromDb.length) return [{ jerseyNumber: "", fullName: "", birthYear: String(year) }];
     return fromDb.map((player) => ({
       jerseyNumber: player.number != null ? String(player.number) : "",
       fullName: player.fullName,
-      birthYear: String(year),
+      birthYear: player.dateOfBirth ? String(new Date(player.dateOfBirth).getFullYear()) : String(year),
     }));
   }
 
@@ -61,7 +76,7 @@ export default function TeamApplicationFormPage() {
     event.preventDefault();
     setError(null);
     setSuccess(null);
-    if (!competition) return;
+    if (!selectedCompetition) return;
     if (generationYears.length === 0) {
       setError("Unesite generacije djece.");
       return;
@@ -69,7 +84,7 @@ export default function TeamApplicationFormPage() {
 
     try {
       await submit.mutateAsync({
-        competitionId: competition.id,
+        competitionId: selectedCompetition.id,
         teamId: teamId || null,
         teamName: teamName.trim(),
         generationYears,
@@ -78,7 +93,7 @@ export default function TeamApplicationFormPage() {
             .filter((row) => row.fullName.trim().length > 0 && row.jerseyNumber.trim().length > 0)
             .map((row) => ({
               generationYear: year,
-              birthYear: year,
+              birthYear: Number(row.birthYear) || year,
               jerseyNumber: Number(row.jerseyNumber),
               fullName: row.fullName.trim(),
             }))
@@ -133,9 +148,20 @@ export default function TeamApplicationFormPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title={`Prijava: ${competition.name}`} description={`Sezona: ${competition.seasonLabel ?? "N/A"}`} />
+      <PageHeader title={`Prijava: ${(selectedCompetition ?? competition).name}`} description={`Sezona: ${(selectedCompetition ?? competition).seasonLabel ?? "N/A"}`} />
       <Card className="p-6">
         <form className="space-y-5" onSubmit={(event) => void onSubmit(event)}>
+          {seasonOptions.length > 0 ? (
+            <FormField label="Sezona">
+              <Select value={selectedCompetitionId} onChange={(event) => setSelectedCompetitionId(event.currentTarget.value)}>
+                {seasonOptions.map((option) => (
+                  <option key={option.competitionId} value={option.competitionId}>
+                    {option.seasonLabel ?? "N/A"}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          ) : null}
           <div className="grid gap-3 md:grid-cols-2">
             <FormField label="Ekipa" required>
               <Input
@@ -271,9 +297,12 @@ export default function TeamApplicationFormPage() {
                                 value={row.fullName}
                                 onChange={(event) => {
                                   const value = event.currentTarget.value;
-                                  const matched = (playersQuery.data ?? []).find(
-                                    (player) => player.fullName.toLowerCase() === value.trim().toLowerCase()
-                                  );
+                                  const allowedBirthYears = new Set(allowedBirthYearsForGeneration(year));
+                                  const matched = (playersQuery.data ?? []).find((player) => {
+                                    if (player.fullName.toLowerCase() !== value.trim().toLowerCase()) return false;
+                                    if (!player.dateOfBirth) return false;
+                                    return allowedBirthYears.has(new Date(player.dateOfBirth).getFullYear());
+                                  });
                                   setPlayersByGeneration((current) => ({
                                     ...current,
                                     [year]: rows.map((item, itemIndex) =>
@@ -283,7 +312,9 @@ export default function TeamApplicationFormPage() {
                                             fullName: value,
                                             jerseyNumber:
                                               matched?.number != null ? String(matched.number) : item.jerseyNumber,
-                                            birthYear: String(year),
+                                            birthYear: matched?.dateOfBirth
+                                              ? String(new Date(matched.dateOfBirth).getFullYear())
+                                              : item.birthYear || String(year),
                                           }
                                         : item
                                     ),
@@ -293,10 +324,22 @@ export default function TeamApplicationFormPage() {
                             </td>
                             <td className="p-2">
                               <Select
-                                value={String(year)}
-                                disabled
+                                value={row.birthYear || String(year)}
+                                onChange={(event) => {
+                                  const value = event.currentTarget.value;
+                                  setPlayersByGeneration((current) => ({
+                                    ...current,
+                                    [year]: rows.map((item, itemIndex) =>
+                                      itemIndex === index ? { ...item, birthYear: value } : item
+                                    ),
+                                  }));
+                                }}
                               >
-                                <option value={String(year)}>{year}</option>
+                                {allowedBirthYearsForGeneration(year).map((birthYear) => (
+                                  <option key={`${year}-${birthYear}`} value={String(birthYear)}>
+                                    {birthYear}
+                                  </option>
+                                ))}
                               </Select>
                             </td>
                             <td className="p-2 text-right">
@@ -322,7 +365,15 @@ export default function TeamApplicationFormPage() {
             })}
           </div>
           <datalist id="players-autocomplete-list">
-            {(playersQuery.data ?? []).map((player) => (
+            {(playersQuery.data ?? [])
+              .filter((player) => {
+                if (!player.dateOfBirth) return false;
+                const playerYear = new Date(player.dateOfBirth).getFullYear();
+                return generationYears.some((generationYear) =>
+                  allowedBirthYearsForGeneration(generationYear).includes(playerYear)
+                );
+              })
+              .map((player) => (
               <option key={player.id} value={player.fullName}>
                 {player.team ? `${player.team}` : ""}
               </option>

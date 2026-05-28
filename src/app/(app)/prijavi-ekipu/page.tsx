@@ -58,7 +58,7 @@ export default function TeamApplicationsEntryPage() {
                 </span>
               </div>
               <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>
-                Sezona: {competition.seasonLabel ?? "N/A"} • Sport: {competition.sport}
+                Sezona: {competition.seasonLabel ?? "N/A"} • Sport: {competition.sport} • Aktivne sezone: {competition.seasonOptions.length}
               </p>
             </Card>
           </Link>

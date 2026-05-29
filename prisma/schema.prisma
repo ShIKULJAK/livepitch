@@ -256,6 +256,16 @@ model Player {
   status       PlayerStatus @default(ACTIVE)
   dominantFoot DominantFoot @default(RIGHT)
   profileImageUrl String?
+  bio          String?
+  radarDefending Int?
+  radarPhysical  Int?
+  radarSpeed     Int?
+  radarPassing   Int?
+  radarGameIQ    Int?
+  achievements   String[]
+  strengths      String[]
+  improvements   String[]
+  coachNote      String?
   createdById    String?
   dateOfBirth  DateTime?
   teamId       String

@@ -40,6 +40,9 @@ export async function POST(request: Request) {
     }
 
     const rawNationalities = formData.get("nationalities");
+    const rawAchievements = formData.get("achievements");
+    const rawStrengths = formData.get("strengths");
+    const rawImprovements = formData.get("improvements");
     payload = {
       sport: formData.get("sport"),
       teamId: formData.get("teamId"),
@@ -55,6 +58,16 @@ export async function POST(request: Request) {
       status: formData.get("status"),
       dominantFoot: formData.get("dominantFoot"),
       profileImageUrl,
+      bio: formData.get("bio") || null,
+      radarDefending: formData.get("radarDefending") ? Number(formData.get("radarDefending")) : null,
+      radarPhysical: formData.get("radarPhysical") ? Number(formData.get("radarPhysical")) : null,
+      radarSpeed: formData.get("radarSpeed") ? Number(formData.get("radarSpeed")) : null,
+      radarPassing: formData.get("radarPassing") ? Number(formData.get("radarPassing")) : null,
+      radarGameIQ: formData.get("radarGameIQ") ? Number(formData.get("radarGameIQ")) : null,
+      achievements: typeof rawAchievements === "string" ? rawAchievements.split("|").map((item) => item.trim()).filter(Boolean) : [],
+      strengths: typeof rawStrengths === "string" ? rawStrengths.split("|").map((item) => item.trim()).filter(Boolean) : [],
+      improvements: typeof rawImprovements === "string" ? rawImprovements.split("|").map((item) => item.trim()).filter(Boolean) : [],
+      coachNote: formData.get("coachNote") || null,
     };
   } else {
     payload = await request.json();

@@ -33,6 +33,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
 
     const rawNationalities = formData.get("nationalities");
+    const rawAchievements = formData.get("achievements");
+    const rawStrengths = formData.get("strengths");
+    const rawImprovements = formData.get("improvements");
     const rawClubHistory = formData.get("clubHistory");
     let parsedClubHistory: unknown = undefined;
     if (typeof rawClubHistory === "string" && rawClubHistory.trim().length) {
@@ -58,6 +61,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       status: formData.get("status") || undefined,
       dominantFoot: formData.get("dominantFoot") || undefined,
       profileImageUrl,
+      bio: formData.get("bio") || undefined,
+      radarDefending: formData.get("radarDefending") ? Number(formData.get("radarDefending")) : undefined,
+      radarPhysical: formData.get("radarPhysical") ? Number(formData.get("radarPhysical")) : undefined,
+      radarSpeed: formData.get("radarSpeed") ? Number(formData.get("radarSpeed")) : undefined,
+      radarPassing: formData.get("radarPassing") ? Number(formData.get("radarPassing")) : undefined,
+      radarGameIQ: formData.get("radarGameIQ") ? Number(formData.get("radarGameIQ")) : undefined,
+      achievements:
+        typeof rawAchievements === "string" ? rawAchievements.split("|").map((item) => item.trim()).filter(Boolean) : undefined,
+      strengths:
+        typeof rawStrengths === "string" ? rawStrengths.split("|").map((item) => item.trim()).filter(Boolean) : undefined,
+      improvements:
+        typeof rawImprovements === "string" ? rawImprovements.split("|").map((item) => item.trim()).filter(Boolean) : undefined,
+      coachNote: formData.get("coachNote") || undefined,
       clubHistory: parsedClubHistory,
     };
   } else {

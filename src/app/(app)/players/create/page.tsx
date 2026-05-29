@@ -5,7 +5,7 @@ import { DominantFoot, PlayerStatus, SportType } from "@prisma/client";
 import { useRouter } from "next/navigation";
 import { useCreatePlayer, useTeams } from "@/hooks/use-competitions";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import { countryFlag, COUNTRY_OPTIONS } from "@/lib/constants/countries";
+import { COUNTRY_OPTIONS } from "@/lib/constants/countries";
 import { SPORT_OPTIONS } from "@/lib/constants/sports";
 import { canEditContent } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
+import { NationalityBadge } from "@/components/ui/nationality-badge";
 import { Select } from "@/components/ui/select";
 
 const statusOptions: Array<{ value: PlayerStatus; label: string }> = [
@@ -50,6 +51,16 @@ export default function CreatePlayerPage() {
   const [weightKg, setWeightKg] = useState("");
   const [status, setStatus] = useState<PlayerStatus>(PlayerStatus.ACTIVE);
   const [dominantFoot, setDominantFoot] = useState<DominantFoot>(DominantFoot.RIGHT);
+  const [bio, setBio] = useState("");
+  const [radarDefending, setRadarDefending] = useState("60");
+  const [radarPhysical, setRadarPhysical] = useState("60");
+  const [radarSpeed, setRadarSpeed] = useState("60");
+  const [radarPassing, setRadarPassing] = useState("60");
+  const [radarGameIQ, setRadarGameIQ] = useState("60");
+  const [achievements, setAchievements] = useState("Team Spirit Award\nMost Improved Player\nFair Play Award");
+  const [strengths, setStrengths] = useState("Tactical awareness\nPositioning\nWork ethic");
+  const [improvements, setImprovements] = useState("Endurance\nCrossing\nShooting");
+  const [coachNote, setCoachNote] = useState("Danilo pokazuje stabilan napredak i dobar odnos prema treningu.");
   const [image, setImage] = useState<File | null>(null);
   const imagePreviewUrl = useMemo(() => (image ? URL.createObjectURL(image) : null), [image]);
 
@@ -91,6 +102,16 @@ export default function CreatePlayerPage() {
     formData.set("weightKg", weightKg);
     formData.set("status", status);
     formData.set("dominantFoot", dominantFoot);
+    formData.set("bio", bio);
+    formData.set("radarDefending", radarDefending);
+    formData.set("radarPhysical", radarPhysical);
+    formData.set("radarSpeed", radarSpeed);
+    formData.set("radarPassing", radarPassing);
+    formData.set("radarGameIQ", radarGameIQ);
+    formData.set("achievements", achievements.split("\n").map((item) => item.trim()).filter(Boolean).join("|"));
+    formData.set("strengths", strengths.split("\n").map((item) => item.trim()).filter(Boolean).join("|"));
+    formData.set("improvements", improvements.split("\n").map((item) => item.trim()).filter(Boolean).join("|"));
+    formData.set("coachNote", coachNote);
     if (image) formData.set("profileImage", image);
 
     await createPlayer.mutateAsync(formData);
@@ -166,7 +187,6 @@ export default function CreatePlayerPage() {
             </datalist>
             <div className="flex flex-wrap gap-2">
               {nationalities.map((item) => {
-                const country = COUNTRY_OPTIONS.find((option) => option.name.toLowerCase() === item.toLowerCase());
                 return (
                   <button
                     key={item}
@@ -175,8 +195,7 @@ export default function CreatePlayerPage() {
                     style={{ borderColor: "var(--border)" }}
                     onClick={() => setNationalities((current) => current.filter((value) => value !== item))}
                   >
-                    {country ? `${countryFlag(country.code)} ` : ""}
-                    {item} x
+                    <NationalityBadge nationality={item} /> x
                   </button>
                 );
               })}
@@ -206,6 +225,48 @@ export default function CreatePlayerPage() {
               ))}
             </Select>
           </FormField>
+          <FormField label="Player Bio" tooltip="Short player description/bio." className="md:col-span-2">
+            <textarea
+              className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
+              style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }}
+              rows={3}
+              maxLength={1200}
+              value={bio}
+              onChange={(event) => setBio(event.currentTarget.value)}
+              placeholder="Kratki opis igrača..."
+            />
+          </FormField>
+          <div className="grid gap-3 md:col-span-2 md:grid-cols-5">
+            <FormField label="Defending" tooltip="0-100">
+              <Input type="number" min={0} max={100} value={radarDefending} onChange={(event) => setRadarDefending(event.currentTarget.value)} />
+            </FormField>
+            <FormField label="Physical" tooltip="0-100">
+              <Input type="number" min={0} max={100} value={radarPhysical} onChange={(event) => setRadarPhysical(event.currentTarget.value)} />
+            </FormField>
+            <FormField label="Speed" tooltip="0-100">
+              <Input type="number" min={0} max={100} value={radarSpeed} onChange={(event) => setRadarSpeed(event.currentTarget.value)} />
+            </FormField>
+            <FormField label="Passing" tooltip="0-100">
+              <Input type="number" min={0} max={100} value={radarPassing} onChange={(event) => setRadarPassing(event.currentTarget.value)} />
+            </FormField>
+            <FormField label="Game IQ" tooltip="0-100">
+              <Input type="number" min={0} max={100} value={radarGameIQ} onChange={(event) => setRadarGameIQ(event.currentTarget.value)} />
+            </FormField>
+          </div>
+          <div className="grid gap-3 md:col-span-2 md:grid-cols-2">
+            <FormField label="Achievements" tooltip="Jedna stavka po redu.">
+              <textarea className="w-full rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }} rows={4} value={achievements} onChange={(event) => setAchievements(event.currentTarget.value)} />
+            </FormField>
+            <FormField label="Strengths" tooltip="Jedna stavka po redu.">
+              <textarea className="w-full rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }} rows={4} value={strengths} onChange={(event) => setStrengths(event.currentTarget.value)} />
+            </FormField>
+            <FormField label="Areas for Improvement" tooltip="Jedna stavka po redu.">
+              <textarea className="w-full rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }} rows={4} value={improvements} onChange={(event) => setImprovements(event.currentTarget.value)} />
+            </FormField>
+            <FormField label="Coach's Note" tooltip="Napomena trenera.">
+              <textarea className="w-full rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }} rows={4} value={coachNote} onChange={(event) => setCoachNote(event.currentTarget.value)} />
+            </FormField>
+          </div>
           <FormField label="Player Profile Image" tooltip="Upload PNG/JPG/WEBP. Image is auto-resized to 150x150 and compressed to <=300KB." className="md:col-span-2">
             <Input
               className="md:col-span-2"

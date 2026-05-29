@@ -8,6 +8,11 @@ type PlayerInput = z.infer<typeof playerInputSchema>;
 type PlayerUpdate = z.infer<typeof playerUpdateSchema>;
 type PlayerHistoryPatchInput = Array<{ id?: string; teamId: string; fromYear: number; toYear: number | null }>;
 
+const DEFAULT_ACHIEVEMENTS = ["Team Spirit Award", "Most Improved Player", "Fair Play Award"];
+const DEFAULT_STRENGTHS = ["Tactical awareness", "Positioning", "Work ethic"];
+const DEFAULT_IMPROVEMENTS = ["Endurance", "Crossing", "Shooting"];
+const DEFAULT_COACH_NOTE = "Danilo pokazuje stabilan napredak i dobar odnos prema treningu.";
+
 export async function createPlayer(organizationId: string, createdById: string, input: PlayerInput) {
   const team = await prisma.team.findFirst({
     where: { id: input.teamId, organizationId },
@@ -39,6 +44,16 @@ export async function createPlayer(organizationId: string, createdById: string, 
         status: input.status,
         dominantFoot: input.dominantFoot,
         profileImageUrl: input.profileImageUrl ?? null,
+        bio: input.bio ?? null,
+        radarDefending: input.radarDefending ?? null,
+        radarPhysical: input.radarPhysical ?? null,
+        radarSpeed: input.radarSpeed ?? null,
+        radarPassing: input.radarPassing ?? null,
+        radarGameIQ: input.radarGameIQ ?? null,
+        achievements: input.achievements?.length ? input.achievements : DEFAULT_ACHIEVEMENTS,
+        strengths: input.strengths?.length ? input.strengths : DEFAULT_STRENGTHS,
+        improvements: input.improvements?.length ? input.improvements : DEFAULT_IMPROVEMENTS,
+        coachNote: input.coachNote ?? DEFAULT_COACH_NOTE,
         dateOfBirth: new Date(input.dateOfBirth),
       },
     });
@@ -139,6 +154,16 @@ export async function updatePlayer(
         ...(input.status !== undefined ? { status: input.status } : {}),
         ...(input.dominantFoot !== undefined ? { dominantFoot: input.dominantFoot } : {}),
         ...(input.profileImageUrl !== undefined ? { profileImageUrl: input.profileImageUrl } : {}),
+        ...(input.bio !== undefined ? { bio: input.bio } : {}),
+        ...(input.radarDefending !== undefined ? { radarDefending: input.radarDefending } : {}),
+        ...(input.radarPhysical !== undefined ? { radarPhysical: input.radarPhysical } : {}),
+        ...(input.radarSpeed !== undefined ? { radarSpeed: input.radarSpeed } : {}),
+        ...(input.radarPassing !== undefined ? { radarPassing: input.radarPassing } : {}),
+        ...(input.radarGameIQ !== undefined ? { radarGameIQ: input.radarGameIQ } : {}),
+        ...(input.achievements !== undefined ? { achievements: input.achievements } : {}),
+        ...(input.strengths !== undefined ? { strengths: input.strengths } : {}),
+        ...(input.improvements !== undefined ? { improvements: input.improvements } : {}),
+        ...(input.coachNote !== undefined ? { coachNote: input.coachNote } : {}),
         ...(input.dateOfBirth !== undefined ? { dateOfBirth: new Date(input.dateOfBirth) } : {}),
       },
     });

@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
+import { NationalityBadge } from "@/components/ui/nationality-badge";
 import { Select } from "@/components/ui/select";
 
 const statusOptions: Array<{ value: PlayerStatus; label: string }> = [
@@ -59,6 +60,16 @@ export default function EditPlayerPage() {
     status?: PlayerStatus;
     dominantFoot?: DominantFoot;
     clubHistory?: Array<{ id?: string; teamId: string; teamName: string; fromYear: string; toYear: string }>;
+    bio?: string;
+    radarDefending?: string;
+    radarPhysical?: string;
+    radarSpeed?: string;
+    radarPassing?: string;
+    radarGameIQ?: string;
+    achievements?: string;
+    strengths?: string;
+    improvements?: string;
+    coachNote?: string;
   }>({});
   const [nationalityInput, setNationalityInput] = useState("");
   const [image, setImage] = useState<File | null>(null);
@@ -115,6 +126,37 @@ export default function EditPlayerPage() {
     formData.set("weightKg", draft.weightKg ?? (player.weightKg ? String(player.weightKg) : ""));
     formData.set("status", draft.status ?? player.status);
     formData.set("dominantFoot", draft.dominantFoot ?? player.dominantFoot);
+    formData.set("bio", draft.bio ?? player.bio ?? "");
+    formData.set("radarDefending", draft.radarDefending ?? String(player.radarDefending ?? 60));
+    formData.set("radarPhysical", draft.radarPhysical ?? String(player.radarPhysical ?? 60));
+    formData.set("radarSpeed", draft.radarSpeed ?? String(player.radarSpeed ?? 60));
+    formData.set("radarPassing", draft.radarPassing ?? String(player.radarPassing ?? 60));
+    formData.set("radarGameIQ", draft.radarGameIQ ?? String(player.radarGameIQ ?? 60));
+    formData.set(
+      "achievements",
+      (draft.achievements ?? (player.achievements ?? ["Team Spirit Award", "Most Improved Player", "Fair Play Award"]).join("\n"))
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .join("|")
+    );
+    formData.set(
+      "strengths",
+      (draft.strengths ?? (player.strengths ?? ["Tactical awareness", "Positioning", "Work ethic"]).join("\n"))
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .join("|")
+    );
+    formData.set(
+      "improvements",
+      (draft.improvements ?? (player.improvements ?? ["Endurance", "Crossing", "Shooting"]).join("\n"))
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .join("|")
+    );
+    formData.set("coachNote", draft.coachNote ?? player.coachNote ?? "Danilo pokazuje stabilan napredak i dobar odnos prema treningu.");
     formData.set(
       "clubHistory",
       JSON.stringify(
@@ -270,7 +312,7 @@ export default function EditPlayerPage() {
                     style={{ borderColor: "var(--border)" }}
                     onClick={() => setDraft((current) => ({ ...current, nationalities: nationalities.filter((value) => value !== item) }))}
                   >
-                    {item} x
+                    <NationalityBadge nationality={item} /> x
                   </button>
                 ))}
               </div>
@@ -330,6 +372,132 @@ export default function EditPlayerPage() {
               ))}
             </Select>
           </FormField>
+          <FormField label="Player Bio" tooltip="Short player description/bio." className="md:col-span-2">
+            <textarea
+              className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
+              style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }}
+              rows={3}
+              maxLength={1200}
+              value={draft.bio ?? player.bio ?? ""}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setDraft((current) => ({ ...current, bio: value }));
+              }}
+              placeholder="Kratki opis igrača..."
+            />
+          </FormField>
+          <div className="grid gap-3 md:col-span-2 md:grid-cols-5">
+            <FormField label="Defending" tooltip="0-100">
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={draft.radarDefending ?? String(player.radarDefending ?? 60)}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, radarDefending: value }));
+                }}
+              />
+            </FormField>
+            <FormField label="Physical" tooltip="0-100">
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={draft.radarPhysical ?? String(player.radarPhysical ?? 60)}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, radarPhysical: value }));
+                }}
+              />
+            </FormField>
+            <FormField label="Speed" tooltip="0-100">
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={draft.radarSpeed ?? String(player.radarSpeed ?? 60)}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, radarSpeed: value }));
+                }}
+              />
+            </FormField>
+            <FormField label="Passing" tooltip="0-100">
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={draft.radarPassing ?? String(player.radarPassing ?? 60)}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, radarPassing: value }));
+                }}
+              />
+            </FormField>
+            <FormField label="Game IQ" tooltip="0-100">
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={draft.radarGameIQ ?? String(player.radarGameIQ ?? 60)}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, radarGameIQ: value }));
+                }}
+              />
+            </FormField>
+          </div>
+          <div className="grid gap-3 md:col-span-2 md:grid-cols-2">
+            <FormField label="Achievements" tooltip="Jedna stavka po redu.">
+              <textarea
+                className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
+                style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }}
+                rows={4}
+                value={draft.achievements ?? (player.achievements ?? ["Team Spirit Award", "Most Improved Player", "Fair Play Award"]).join("\n")}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, achievements: value }));
+                }}
+              />
+            </FormField>
+            <FormField label="Strengths" tooltip="Jedna stavka po redu.">
+              <textarea
+                className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
+                style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }}
+                rows={4}
+                value={draft.strengths ?? (player.strengths ?? ["Tactical awareness", "Positioning", "Work ethic"]).join("\n")}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, strengths: value }));
+                }}
+              />
+            </FormField>
+            <FormField label="Areas for Improvement" tooltip="Jedna stavka po redu.">
+              <textarea
+                className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
+                style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }}
+                rows={4}
+                value={draft.improvements ?? (player.improvements ?? ["Endurance", "Crossing", "Shooting"]).join("\n")}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, improvements: value }));
+                }}
+              />
+            </FormField>
+            <FormField label="Coach's Note" tooltip="Napomena trenera.">
+              <textarea
+                className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
+                style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-1)" }}
+                rows={4}
+                value={draft.coachNote ?? player.coachNote ?? "Danilo pokazuje stabilan napredak i dobar odnos prema treningu."}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, coachNote: value }));
+                }}
+              />
+            </FormField>
+          </div>
           <div className="space-y-2 md:col-span-2">
             <p className="text-sm font-semibold" style={{ color: "var(--text-secondary)" }}>
               Istorija klubova

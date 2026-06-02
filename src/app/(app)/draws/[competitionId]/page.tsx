@@ -13,6 +13,7 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Select } from "@/components/ui/select";
+import { formatDateTimeStable } from "@/lib/utils/date";
 
 type DrawTeam = { name: string; profileImageUrl?: string | null };
 type DrawMatch = {
@@ -531,15 +532,7 @@ export default function CompetitionDrawPage() {
   const hasSF = sfLeft.length > 0 || sfRight.length > 0;
   const hasFinal = Boolean(finalRound?.matches?.length);
 
-  const formatKickoff = (value: string) =>
-    new Date(value).toLocaleString("sr-Latn-RS", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
+  const formatKickoff = (value: string) => formatDateTimeStable(value);
 
   const formatVenueDisplay = (venueLabel?: string | null, pitchName?: string | null) => {
     const separator = " - ";

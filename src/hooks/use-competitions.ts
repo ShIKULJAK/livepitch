@@ -206,6 +206,8 @@ const playersResponse = z.object({
       teamId: z.string(),
       team: z.string(),
       teamProfileImageUrl: z.string().nullable(),
+      goals: z.number().optional(),
+      assists: z.number().optional(),
       clubHistory: z
         .array(
           z.object({

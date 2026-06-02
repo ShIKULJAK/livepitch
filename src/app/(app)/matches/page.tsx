@@ -62,6 +62,7 @@ function MatchesPageContent() {
   const [searchValue, setSearchValue] = useState("");
   const [openCompetitions, setOpenCompetitions] = useState<Record<string, boolean>>({});
   const [openGenerations, setOpenGenerations] = useState<Record<string, boolean>>({});
+  const [openMenuMatchId, setOpenMenuMatchId] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const matchesQuery = useMatches({ status: statusFilter, competitionId });
   const deleteMatch = useDeleteMatch();
@@ -278,12 +279,15 @@ function MatchesPageContent() {
                     <summary className="cursor-pointer rounded-md border px-3 py-2 text-sm font-medium" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
                       {generationLabel}
                     </summary>
-                    <div className="mt-2 overflow-x-auto lp-scrollbar rounded-md border" style={{ borderColor: "var(--border)" }}>
+                    <div
+                      className="mt-2 max-h-[calc(100dvh-22rem)] overflow-auto lp-scrollbar rounded-md border"
+                      style={{ borderColor: "var(--border)" }}
+                    >
                       <table className="min-w-full text-sm">
-                        <thead style={{ backgroundColor: "var(--surface-2)" }}>
+                        <thead className="sticky top-0 z-10" style={{ backgroundColor: "var(--surface-2)" }}>
                           <tr>
                             {["Datum", t("table.time"), t("table.match"), t("table.tournament"), t("table.venue"), t("table.status"), t("table.action")].map((h) => (
-                              <th key={h} className="px-4 py-3 text-left text-xs uppercase" style={{ color: "var(--text-secondary)" }}>
+                              <th key={h} className="px-4 py-3 text-center text-xs uppercase" style={{ color: "var(--text-secondary)" }}>
                                 {h}
                               </th>
                             ))}
@@ -296,8 +300,8 @@ function MatchesPageContent() {
                               const isVirtualKnockout = Boolean(match.isVirtualKnockout);
                               return (
                                 <tr key={match.id} className="border-t" style={{ borderColor: "var(--border)" }}>
-                                  <td className="px-4 py-3">{formatDateDDMMYYYY(match.scheduledAt)}</td>
-                                  <td className="px-4 py-3">{formatTimeStable(match.scheduledAt)}</td>
+                                  <td className="px-4 py-3 text-center">{formatDateDDMMYYYY(match.scheduledAt)}</td>
+                                  <td className="px-4 py-3 text-center">{formatTimeStable(match.scheduledAt)}</td>
                                   <td className="px-4 py-3">
                                     <div className="flex items-start gap-2">
                                       <FavoriteButton targetType={FavoriteTargetType.MATCH} targetId={match.id} className="mt-0.5" />
@@ -323,39 +327,74 @@ function MatchesPageContent() {
                                       </div>
                                     </div>
                                   </td>
-                                  <td className="px-4 py-3">{match.competition}</td>
-                                  <td className="px-4 py-3">{match.venue}</td>
-                                  <td className="px-4 py-3">
-                                    <Badge variant={getBadgeVariant(match.status)}>{match.status}</Badge>
-                                  </td>
-                                  <td className="px-4 py-3">
-                                    <div className="flex items-center gap-3">
-                                      {!isVirtualKnockout ? (
-                                        <Link href={`/matches/${match.id}`} style={{ color: "var(--primary)" }}>
-                                          {t("common.open")}
-                                        </Link>
-                                      ) : (
-                                        <span style={{ color: "var(--text-secondary)" }}>Knockout</span>
-                                      )}
-                                      {canEditRow && !isVirtualKnockout ? (
-                                        <>
-                                          <Link href={`/matches/${match.id}/edit`} style={{ color: "var(--info)" }}>
-                                            Edit
-                                          </Link>
-                                          <button
-                                            type="button"
-                                            style={{ color: "var(--danger)" }}
-                                            onClick={() => {
-                                              if (!window.confirm(`Delete match ${match.homeTeam} vs ${match.awayTeam}?`)) return;
-                                              deleteMatch.mutate(match.id);
-                                            }}
-                                            disabled={deleteMatch.isPending}
-                                          >
-                                            Delete
-                                          </button>
-                                        </>
-                                      ) : null}
+                                  <td className="px-4 py-3 text-center">{match.competition}</td>
+                                  <td className="px-4 py-3 text-center">{match.venue}</td>
+                                  <td className="px-4 py-3 text-center">
+                                    <div className="flex justify-center">
+                                      <Badge variant={getBadgeVariant(match.status)}>{match.status}</Badge>
                                     </div>
+                                  </td>
+                                  <td className="relative px-4 py-3">
+                                    <div className="flex items-center justify-center">
+                                      <button
+                                        type="button"
+                                        className="rounded-md border px-2 py-1 text-xs"
+                                        style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}
+                                        onClick={() =>
+                                          setOpenMenuMatchId((current) => (current === match.id ? null : match.id))
+                                        }
+                                        aria-label="Open actions"
+                                      >
+                                        ...
+                                      </button>
+                                    </div>
+                                    {openMenuMatchId === match.id ? (
+                                      <div
+                                        className="absolute right-2 top-10 z-20 w-36 rounded-lg border p-1 text-xs shadow-lg"
+                                        style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}
+                                      >
+                                        {!isVirtualKnockout ? (
+                                          <Link
+                                            href={`/matches/${match.id}`}
+                                            className="block rounded-md px-2 py-1 hover:opacity-90"
+                                            onClick={() => setOpenMenuMatchId(null)}
+                                          >
+                                            Open match
+                                          </Link>
+                                        ) : (
+                                          <span
+                                            className="block rounded-md px-2 py-1"
+                                            style={{ color: "var(--text-secondary)" }}
+                                          >
+                                            Knockout
+                                          </span>
+                                        )}
+                                        {canEditRow && !isVirtualKnockout ? (
+                                          <>
+                                            <Link
+                                              href={`/matches/${match.id}/edit`}
+                                              className="block rounded-md px-2 py-1 hover:opacity-90"
+                                              onClick={() => setOpenMenuMatchId(null)}
+                                            >
+                                              Edit match
+                                            </Link>
+                                            <button
+                                              type="button"
+                                              className="block w-full rounded-md px-2 py-1 text-left hover:opacity-90"
+                                              style={{ color: "var(--danger)" }}
+                                              onClick={() => {
+                                                if (!window.confirm(`Delete match ${match.homeTeam} vs ${match.awayTeam}?`)) return;
+                                                deleteMatch.mutate(match.id);
+                                                setOpenMenuMatchId(null);
+                                              }}
+                                              disabled={deleteMatch.isPending}
+                                            >
+                                              Delete match
+                                            </button>
+                                          </>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
                                   </td>
                                 </tr>
                               );

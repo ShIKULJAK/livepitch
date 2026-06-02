@@ -2,7 +2,7 @@ import { CompetitionType, MatchStatus } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { listMatchesForExport } from "@/lib/repositories/matches";
-import { formatDateDDMMYYYY } from "@/lib/utils/date";
+import { formatDateDDMMYYYY, formatTimeHHMM } from "@/lib/utils/date";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import { prisma } from "@/lib/db/prisma";
 
@@ -316,7 +316,7 @@ async function buildSchedulePdf(
     const row = {
       index: String(index + 1),
       date: formatDateDDMMYYYY(date),
-      time: date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      time: formatTimeHHMM(date),
       comp: truncate(match.competition.name, 60),
       season: truncate(match.competition.season?.name ?? "-", 10),
       gen: match.generationYear ? String(match.generationYear) : "-",
@@ -562,7 +562,7 @@ export async function GET(request: Request) {
     const venueLabel = match.venueLabel?.trim() || match.venue?.name?.trim() || "";
     return [
       formatDateDDMMYYYY(date),
-      date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      formatTimeHHMM(date),
       match.competition.name,
       seasonLabel,
       generationLabel,

@@ -42,6 +42,41 @@ function getPlayerInitials(firstName?: string | null, lastName?: string | null, 
   return "IG";
 }
 
+type PlayerViewTab = "ALL" | "BY_TEAM" | "GOAL_SCORERS" | "TOP_ASSISTS" | "TOP_RATED";
+
+const playerViewTabs: Array<{ id: PlayerViewTab; label: string }> = [
+  { id: "ALL", label: "All Players" },
+  { id: "BY_TEAM", label: "By Team" },
+  { id: "GOAL_SCORERS", label: "Goal Scorers" },
+  { id: "TOP_ASSISTS", label: "Top Assists" },
+  { id: "TOP_RATED", label: "Top Rated" },
+];
+
+function getPlayerOverall(player: {
+  radarDefending?: number | null;
+  radarPhysical?: number | null;
+  radarSpeed?: number | null;
+  radarPassing?: number | null;
+  radarGameIQ?: number | null;
+}) {
+  const radarValues = [
+    player.radarDefending ?? 60,
+    player.radarPhysical ?? 60,
+    player.radarSpeed ?? 60,
+    player.radarPassing ?? 60,
+    player.radarGameIQ ?? 60,
+  ];
+  return Math.round(radarValues.reduce((sum, current) => sum + current, 0) / radarValues.length);
+}
+
+function getPlayerGoals(player: { goals?: number | null }) {
+  return player.goals ?? 0;
+}
+
+function getPlayerAssists(player: { assists?: number | null }) {
+  return player.assists ?? 0;
+}
+
 export default function PlayersPage() {
   const { t } = useI18n();
   const playersQuery = usePlayers();
@@ -53,6 +88,7 @@ export default function PlayersPage() {
   const [positionFilter, setPositionFilter] = useState<string>("ALL");
   const [nationalityFilter, setNationalityFilter] = useState<string>("ALL");
   const [sortBy, setSortBy] = useState<string>("OVR_DESC");
+  const [activeTab, setActiveTab] = useState<PlayerViewTab>("ALL");
   const [viewMode, setViewMode] = useState<"list" | "grid">("grid");
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
@@ -105,20 +141,19 @@ export default function PlayersPage() {
         return matchesQuery && matchesTournament && matchesTeam && matchesPosition && matchesNationality;
       });
 
-      const getOvr = (player: (typeof filtered)[number]) => {
-        const radarValues = [
-          player.radarDefending ?? 60,
-          player.radarPhysical ?? 60,
-          player.radarSpeed ?? 60,
-          player.radarPassing ?? 60,
-          player.radarGameIQ ?? 60,
-        ];
-        return Math.round(radarValues.reduce((sum, current) => sum + current, 0) / radarValues.length);
-      };
-
       const sorted = [...filtered];
-      if (sortBy === "OVR_DESC") {
-        sorted.sort((a, b) => getOvr(b) - getOvr(a));
+      if (activeTab === "BY_TEAM") {
+        sorted.sort((a, b) => a.team.localeCompare(b.team) || a.fullName.localeCompare(b.fullName));
+      } else if (activeTab === "GOAL_SCORERS") {
+        sorted.sort((a, b) => getPlayerGoals(b) - getPlayerGoals(a) || a.fullName.localeCompare(b.fullName));
+        return sorted.filter((player) => getPlayerGoals(player) > 0);
+      } else if (activeTab === "TOP_ASSISTS") {
+        sorted.sort((a, b) => getPlayerAssists(b) - getPlayerAssists(a) || a.fullName.localeCompare(b.fullName));
+        return sorted.filter((player) => getPlayerAssists(player) > 0);
+      } else if (activeTab === "TOP_RATED") {
+        sorted.sort((a, b) => getPlayerOverall(b) - getPlayerOverall(a) || a.fullName.localeCompare(b.fullName));
+      } else if (sortBy === "OVR_DESC") {
+        sorted.sort((a, b) => getPlayerOverall(b) - getPlayerOverall(a));
       } else if (sortBy === "AGE_DESC") {
         sorted.sort((a, b) => (b.age ?? 0) - (a.age ?? 0));
       } else if (sortBy === "AGE_ASC") {
@@ -128,7 +163,7 @@ export default function PlayersPage() {
       }
       return sorted;
     },
-    [playersQuery.data, query, tournamentFilter, teamFilter, positionFilter, nationalityFilter, sortBy]
+    [playersQuery.data, query, tournamentFilter, teamFilter, positionFilter, nationalityFilter, sortBy, activeTab]
   );
   const selectedPlayer = useMemo(() => {
     if (!rows.length) return null;
@@ -351,13 +386,27 @@ export default function PlayersPage() {
       <Card className="p-4 md:p-5">
         <div className="space-y-4 border-b pb-4" style={{ borderColor: "var(--border)" }}>
           <div className="flex flex-wrap items-center gap-6 text-sm">
-            <button type="button" className="border-b-2 pb-2 font-semibold" style={{ borderColor: "var(--primary)", color: "var(--primary)" }}>
-              All Players
-            </button>
-            <span style={{ color: "var(--text-secondary)" }}>By Team</span>
-            <span style={{ color: "var(--text-secondary)" }}>Goal Scorers</span>
-            <span style={{ color: "var(--text-secondary)" }}>Top Assists</span>
-            <span style={{ color: "var(--text-secondary)" }}>Top Rated</span>
+            {playerViewTabs.map((tab) => {
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className="border-b-2 pb-2 font-semibold transition-colors"
+                  style={{
+                    borderColor: isActive ? "var(--primary)" : "transparent",
+                    color: isActive ? "var(--primary)" : "var(--text-secondary)",
+                  }}
+                  aria-pressed={isActive}
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    setSelectedPlayerId(null);
+                  }}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Select className="min-w-[160px] flex-1 md:flex-none md:w-44" value={tournamentFilter} onChange={(event) => setTournamentFilter(event.currentTarget.value)}>
@@ -444,13 +493,13 @@ export default function PlayersPage() {
                       player.radarPassing ?? 60,
                       player.radarGameIQ ?? 60,
                     ];
-                    const overall = Math.round(radarValues.reduce((sum, current) => sum + current, 0) / radarValues.length);
+                    const overall = getPlayerOverall(player);
                     const isSelected = selectedPlayer?.id === player.id;
                     const nat = player.nationalities[0] ?? player.nationality ?? null;
                     const apps = "-";
-                    const goals = "-";
-                    const assists = "-";
-                    const rating = "-";
+                    const goals = getPlayerGoals(player);
+                    const assists = getPlayerAssists(player);
+                    const rating = overall;
 
                     return (
                       <tr

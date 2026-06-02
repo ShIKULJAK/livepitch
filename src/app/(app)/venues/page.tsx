@@ -9,6 +9,7 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { PitchDimensionsDiagram } from "@/components/venues/pitch-dimensions-diagram";
 
 type PitchDraft = {
   id?: string;
@@ -36,6 +37,10 @@ function toDraft(input?: Partial<PitchDraft>): PitchDraft {
     goalWidthMeters: input?.goalWidthMeters ?? "",
     goalHeightMeters: input?.goalHeightMeters ?? "",
   };
+}
+
+function getPitchNumberLabel(name: string) {
+  return name.match(/\d+/)?.[0] ?? "";
 }
 
 export default function VenuesPage() {
@@ -139,7 +144,7 @@ export default function VenuesPage() {
     <div className="space-y-4">
       <PageHeader title="Lokacije i tereni" description="Kreiranje i upravljanje terenima sa dimenzijama, golovima i generacijama." />
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
+      <div className="grid items-start gap-4 xl:grid-cols-[1fr_420px]">
         <Card className="overflow-hidden p-4">
           <h3 className="mb-3 text-lg font-semibold">Stadioni i tereni</h3>
           <div className="mb-3 space-y-2">
@@ -180,6 +185,13 @@ export default function VenuesPage() {
                           <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
                             Gol: {pitch.goalWidthMeters ?? "-"} x {pitch.goalHeightMeters ?? "-"} m
                           </p>
+                          <PitchDimensionsDiagram
+                            className="mt-3"
+                            title={`${pitch.name} · 2D prikaz`}
+                            fieldNumber={getPitchNumberLabel(pitch.name)}
+                            lengthMeters={pitch.fieldLengthMeters}
+                            widthMeters={pitch.fieldWidthMeters}
+                          />
                           <div className="mt-2 flex gap-2">
                             <Button
                               type="button"
@@ -231,22 +243,47 @@ export default function VenuesPage() {
           {!allPitches.length ? <p className="text-sm" style={{ color: "var(--text-secondary)" }}>Nema unesenih terena.</p> : null}
         </Card>
 
+        <div className="self-start space-y-4">
         <Card className="p-4">
           <h3 className="mb-3 text-lg font-semibold">{venueDraft.id ? "Uredi stadion" : "Novi stadion"}</h3>
           <div className="mb-4 space-y-2 rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
             <FormField label="Naziv stadiona">
-              <Input value={venueDraft.name} onChange={(event) => setVenueDraft((current) => ({ ...current, name: event.target.value }))} />
+              <Input
+                value={venueDraft.name}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setVenueDraft((current) => ({ ...current, name: value }));
+                }}
+              />
             </FormField>
             <div className="grid grid-cols-2 gap-2">
               <FormField label="Grad">
-                <Input value={venueDraft.city} onChange={(event) => setVenueDraft((current) => ({ ...current, city: event.target.value }))} />
+                <Input
+                  value={venueDraft.city}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setVenueDraft((current) => ({ ...current, city: value }));
+                  }}
+                />
               </FormField>
               <FormField label="Država">
-                <Input value={venueDraft.country} onChange={(event) => setVenueDraft((current) => ({ ...current, country: event.target.value }))} />
+                <Input
+                  value={venueDraft.country}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setVenueDraft((current) => ({ ...current, country: value }));
+                  }}
+                />
               </FormField>
             </div>
             <FormField label="Team / Club">
-              <Select value={venueDraft.teamId} onChange={(event) => setVenueDraft((current) => ({ ...current, teamId: event.currentTarget.value }))}>
+              <Select
+                value={venueDraft.teamId}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setVenueDraft((current) => ({ ...current, teamId: value }));
+                }}
+              >
                 <option value="">Nije povezano</option>
                 {(teamsQuery.data ?? []).map((team) => (
                   <option key={team.id} value={team.id}>
@@ -267,10 +304,19 @@ export default function VenuesPage() {
             </div>
           </div>
 
+        </Card>
+
+        <Card className="p-4">
           <h3 className="mb-3 text-lg font-semibold">{editingId ? "Uredi teren" : "Novi teren"}</h3>
           <div className="space-y-3">
             <FormField label="Stadion">
-              <Select value={draft.venueId} onChange={(event) => setDraft((current) => ({ ...current, venueId: event.target.value }))}>
+              <Select
+                value={draft.venueId}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, venueId: value }));
+                }}
+              >
                 <option value="">Izaberi stadion</option>
                 {venues.map((venue) => (
                   <option key={venue.id} value={venue.id}>{venue.name}</option>
@@ -278,13 +324,20 @@ export default function VenuesPage() {
               </Select>
             </FormField>
             <FormField label="Naziv terena">
-              <Input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
+              <Input
+                value={draft.name}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, name: value }));
+                }}
+              />
             </FormField>
             <FormField label="Generacija preset">
               <Select
                 value={draft.generationLabel}
                 onChange={(event) => {
-                  applyPreset(event.target.value);
+                  const value = event.currentTarget.value;
+                  applyPreset(value);
                 }}
               >
                 <option value="">Bez preseta</option>
@@ -296,25 +349,79 @@ export default function VenuesPage() {
               </Select>
             </FormField>
             <FormField label="Uzrast (code)">
-              <Input value={draft.ageGroupCode} onChange={(event) => setDraft((current) => ({ ...current, ageGroupCode: event.target.value }))} />
+              <Input
+                value={draft.ageGroupCode}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, ageGroupCode: value }));
+                }}
+              />
             </FormField>
             <FormField label="Format igrača">
-              <Input value={draft.playerFormat} onChange={(event) => setDraft((current) => ({ ...current, playerFormat: event.target.value }))} />
+              <Input
+                value={draft.playerFormat}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setDraft((current) => ({ ...current, playerFormat: value }));
+                }}
+              />
             </FormField>
             <div className="grid grid-cols-2 gap-2">
               <FormField label="Dužina terena (m)">
-                <Input type="number" min={1} value={draft.fieldLengthMeters} onChange={(event) => setDraft((current) => ({ ...current, fieldLengthMeters: event.target.value }))} />
+                <Input
+                  type="number"
+                  min={1}
+                  value={draft.fieldLengthMeters}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setDraft((current) => ({ ...current, fieldLengthMeters: value }));
+                  }}
+                />
               </FormField>
               <FormField label="Širina terena (m)">
-                <Input type="number" min={1} value={draft.fieldWidthMeters} onChange={(event) => setDraft((current) => ({ ...current, fieldWidthMeters: event.target.value }))} />
+                <Input
+                  type="number"
+                  min={1}
+                  value={draft.fieldWidthMeters}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setDraft((current) => ({ ...current, fieldWidthMeters: value }));
+                  }}
+                />
               </FormField>
             </div>
+            {Number(draft.fieldLengthMeters) > 0 && Number(draft.fieldWidthMeters) > 0 ? (
+              <PitchDimensionsDiagram
+                title={draft.name.trim() ? `${draft.name} · pregled` : "Pregled dimenzija"}
+                fieldNumber={getPitchNumberLabel(draft.name)}
+                lengthMeters={Number(draft.fieldLengthMeters)}
+                widthMeters={Number(draft.fieldWidthMeters)}
+              />
+            ) : null}
             <div className="grid grid-cols-2 gap-2">
               <FormField label="Širina gola (m)">
-                <Input type="number" min={0.1} step={0.1} value={draft.goalWidthMeters} onChange={(event) => setDraft((current) => ({ ...current, goalWidthMeters: event.target.value }))} />
+                <Input
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  value={draft.goalWidthMeters}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setDraft((current) => ({ ...current, goalWidthMeters: value }));
+                  }}
+                />
               </FormField>
               <FormField label="Visina gola (m)">
-                <Input type="number" min={0.1} step={0.1} value={draft.goalHeightMeters} onChange={(event) => setDraft((current) => ({ ...current, goalHeightMeters: event.target.value }))} />
+                <Input
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  value={draft.goalHeightMeters}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setDraft((current) => ({ ...current, goalHeightMeters: value }));
+                  }}
+                />
               </FormField>
             </div>
             <div className="flex gap-2">
@@ -325,6 +432,7 @@ export default function VenuesPage() {
             </div>
           </div>
         </Card>
+        </div>
       </div>
     </div>
   );

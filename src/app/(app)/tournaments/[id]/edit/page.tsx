@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { formatDateStable } from "@/lib/utils/date";
 
 function toDateInput(value?: string | null) {
   if (!value) return "";
@@ -905,7 +906,7 @@ export default function EditCompetitionPage() {
                   <span className="text-xs" style={{ color: "var(--text-secondary)" }}>{application.status}</span>
                 </div>
                 <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                  {application.seasonLabel ?? "N/A"} • {new Date(application.submittedAt).toLocaleDateString("sr-Latn-RS")}
+                  {application.seasonLabel ?? "N/A"} • {formatDateStable(application.submittedAt)}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {application.generations.map((generation) => (

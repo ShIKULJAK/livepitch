@@ -627,6 +627,7 @@ export async function listPlayers(organizationId: string) {
     where: { team: { organizationId } },
     include: {
       team: true,
+      _count: { select: { goalEvents: true } },
       clubHistory: {
         include: {
           team: { select: { id: true, name: true } },
@@ -668,6 +669,8 @@ export async function listPlayers(organizationId: string) {
     teamId: player.teamId,
     team: player.team.name,
     teamProfileImageUrl: player.team.profileImageUrl,
+    goals: player._count.goalEvents,
+    assists: 0,
     clubHistory: player.clubHistory.map((item) => ({
       id: item.id,
       teamId: item.teamId,

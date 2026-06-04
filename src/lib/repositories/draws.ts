@@ -1,6 +1,7 @@
 import { CompetitionType, DrawRoundType, DrawSourceType, Prisma } from "@prisma/client";
 import { canEditEntity } from "@/lib/permissions";
 import { prisma } from "@/lib/db/prisma";
+import { syncMaterializedKnockoutMatches } from "@/lib/repositories/matches";
 import type { DrawConfigInput } from "@/lib/validation/draw";
 import { getGenerationPreset } from "@/lib/constants/generation-presets";
 
@@ -141,6 +142,82 @@ function distributeParticipants(teams: Participant[], groupsCount: number) {
   }
 
   return groups;
+}
+
+function isResolvedGroupMatch(match: { homeScore: number | null; awayScore: number | null }) {
+  return match.homeScore !== null && match.awayScore !== null;
+}
+
+function resolveGroupSourceKey(sourceValue: string) {
+  const match = sourceValue.trim().match(/^([A-Z]+)\s*[12]$/i);
+  return match ? match[1].toUpperCase() : sourceValue.trim().toUpperCase();
+}
+
+function computeGroupStandings(input: {
+  teams: Array<{
+    id: string;
+    name: string;
+    profileImageUrl: string | null;
+    position: number | null;
+  }>;
+  matches: Array<{
+    homeTeamId: string;
+    awayTeamId: string;
+    homeScore: number | null;
+    awayScore: number | null;
+  }>;
+}) {
+  const table = new Map(
+    input.teams.map((team) => [
+      team.id,
+      {
+        teamId: team.id,
+        teamName: team.name,
+        profileImageUrl: team.profileImageUrl,
+        seedPosition: team.position,
+        points: 0,
+        goalsFor: 0,
+        goalsAgainst: 0,
+        wins: 0,
+      },
+    ])
+  );
+
+  for (const match of input.matches) {
+    if (match.homeScore === null || match.awayScore === null) continue;
+    const home = table.get(match.homeTeamId);
+    const away = table.get(match.awayTeamId);
+    if (!home || !away) continue;
+
+    home.goalsFor += match.homeScore;
+    home.goalsAgainst += match.awayScore;
+    away.goalsFor += match.awayScore;
+    away.goalsAgainst += match.homeScore;
+
+    if (match.homeScore > match.awayScore) {
+      home.points += 3;
+      home.wins += 1;
+    } else if (match.homeScore < match.awayScore) {
+      away.points += 3;
+      away.wins += 1;
+    } else {
+      home.points += 1;
+      away.points += 1;
+    }
+  }
+
+  return Array.from(table.values()).sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    const goalDiffA = a.goalsFor - a.goalsAgainst;
+    const goalDiffB = b.goalsFor - b.goalsAgainst;
+    if (goalDiffB !== goalDiffA) return goalDiffB - goalDiffA;
+    if (b.goalsFor !== a.goalsFor) return b.goalsFor - a.goalsFor;
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    const seedA = a.seedPosition ?? Number.MAX_SAFE_INTEGER;
+    const seedB = b.seedPosition ?? Number.MAX_SAFE_INTEGER;
+    if (seedA !== seedB) return seedA - seedB;
+    return a.teamName.localeCompare(b.teamName);
+  });
 }
 
 function createGroupFixtures(groupId: string, groupName: string, teamIds: string[], groupOrder: number) {
@@ -921,6 +998,98 @@ export async function getDrawByCompetition(organizationId: string, competitionId
     participantsByGeneration.set(item.generationYear, list);
   }
 
+  const resolvedDraw =
+    draw && draw.groupStageEnabled && draw.groups.length && draw.matches.length
+      ? (() => {
+          const allGroupMatchesResolved = draw.matches.every((match) => isResolvedGroupMatch(match));
+          if (!allGroupMatchesResolved) return draw;
+
+          const groupResolution = new Map<
+            string,
+            {
+              winner: { id: string; name: string; profileImageUrl: string | null } | null;
+              runnerUp: { id: string; name: string; profileImageUrl: string | null } | null;
+              orderedTeamIds: string[];
+            }
+          >();
+
+          const resolvedGroups = draw.groups.map((group) => {
+            const standings = computeGroupStandings({
+              teams: group.teams.map((entry) => ({
+                id: entry.team.id,
+                name: entry.team.name,
+                profileImageUrl: entry.team.profileImageUrl ?? null,
+                position: entry.position,
+              })),
+              matches: draw.matches.filter((match) => match.drawGroupId === group.id),
+            });
+
+            groupResolution.set(group.name, {
+              winner: standings[0]
+                ? {
+                    id: standings[0].teamId,
+                    name: standings[0].teamName,
+                    profileImageUrl: standings[0].profileImageUrl,
+                  }
+                : null,
+              runnerUp: standings[1]
+                ? {
+                    id: standings[1].teamId,
+                    name: standings[1].teamName,
+                    profileImageUrl: standings[1].profileImageUrl,
+                  }
+                : null,
+              orderedTeamIds: standings.map((item) => item.teamId),
+            });
+
+            return {
+              ...group,
+              teams: standings
+                .map((row, index) => {
+                  const source = group.teams.find((entry) => entry.team.id === row.teamId);
+                  return source
+                    ? {
+                        ...source,
+                        position: index + 1,
+                      }
+                    : null;
+                })
+                .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+            };
+          });
+
+          return {
+            ...draw,
+            groups: resolvedGroups,
+            knockoutRounds: draw.knockoutRounds.map((round) => ({
+              ...round,
+              matches: round.matches.map((match) => {
+                const resolvedHomeTeam =
+                  match.homeTeam ??
+                  (match.homeSourceType === DrawSourceType.GROUP_WINNER
+                    ? (groupResolution.get(resolveGroupSourceKey(match.homeSourceValue))?.winner ?? null)
+                    : match.homeSourceType === DrawSourceType.GROUP_RUNNER_UP
+                      ? (groupResolution.get(resolveGroupSourceKey(match.homeSourceValue))?.runnerUp ?? null)
+                      : null);
+                const resolvedAwayTeam =
+                  match.awayTeam ??
+                  (match.awaySourceType === DrawSourceType.GROUP_WINNER
+                    ? (groupResolution.get(resolveGroupSourceKey(match.awaySourceValue))?.winner ?? null)
+                    : match.awaySourceType === DrawSourceType.GROUP_RUNNER_UP
+                      ? (groupResolution.get(resolveGroupSourceKey(match.awaySourceValue))?.runnerUp ?? null)
+                      : null);
+
+                return {
+                  ...match,
+                  homeTeam: resolvedHomeTeam,
+                  awayTeam: resolvedAwayTeam,
+                };
+              }),
+            })),
+          };
+        })()
+      : draw;
+
   return {
     competition: {
       id: competition.id,
@@ -938,10 +1107,10 @@ export async function getDrawByCompetition(organizationId: string, competitionId
       availableGenerationYears,
       selectedGenerationYear,
     },
-    draw: draw
+    draw: resolvedDraw
       ? {
-          ...draw,
-          groupMatches: draw.matches,
+          ...resolvedDraw,
+          groupMatches: resolvedDraw.matches,
         }
       : null,
   };
@@ -1592,6 +1761,8 @@ export async function generateDraw(
       });
     }
 
+    await syncMaterializedKnockoutMatches(tx, draw.id);
+
     return draw;
   });
 }
@@ -1691,6 +1862,8 @@ export async function swapDrawGroupTeams(
       });
     }
 
+    await syncMaterializedKnockoutMatches(tx, draw.id);
+
     return { ok: true };
   });
 }
@@ -1784,6 +1957,8 @@ export async function swapDrawPitches(
         });
       }
     }
+
+    await syncMaterializedKnockoutMatches(tx, draw.id);
 
     return { ok: true };
   });

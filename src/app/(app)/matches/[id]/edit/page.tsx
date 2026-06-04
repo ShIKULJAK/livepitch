@@ -149,7 +149,7 @@ export default function EditMatchPage() {
             </Select>
           </FormField>
           <FormField label="Round / Stage" tooltip="Round stage se podešava kroz Izvlačenje." readOnly>
-            <Input value={match.round ?? ""} readOnly />
+            <Input value={match.phase} readOnly />
           </FormField>
           <FormField label="Home Team" tooltip="Home side for this fixture." required>
             <Select

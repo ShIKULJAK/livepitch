@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { GoalType } from "@prisma/client";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useMatchDetails, useResetMatchDetails, useUpdateMatchDetails } from "@/hooks/use-competitions";
 import { canCreateMatches } from "@/lib/permissions";
@@ -99,6 +99,7 @@ const statTooltips: Record<string, string> = {
 
 export default function MatchDetailsPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const { user } = useCurrentUser();
   const canEditByRole = canCreateMatches(user?.role);
   const matchDetailsQuery = useMatchDetails(params.id);
@@ -198,6 +199,7 @@ export default function MatchDetailsPage() {
       })),
     });
     setDraftForm(null);
+    router.push("/matches");
   }
 
   return (

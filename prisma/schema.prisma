@@ -191,6 +191,7 @@ model Pitch {
   venueId           String?
   venue             Venue?   @relation(fields: [venueId], references: [id], onDelete: SetNull)
   name              String
+  surface           String?
   generationLabel   String?
   ageGroupCode      String?
   playerFormat      String

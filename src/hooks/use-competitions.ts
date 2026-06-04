@@ -236,6 +236,7 @@ const matchesResponse = z.object({
       seasonId: z.string().nullable().optional(),
       seasonLabel: z.string().nullable().optional(),
       round: z.string().nullable(),
+      phase: z.string(),
       scheduledAt: z.string().datetime(),
       status: z.nativeEnum(MatchStatus),
       homeTeamId: z.string(),
@@ -263,6 +264,7 @@ const matchDetailsResponse = z.object({
     competition: z.string(),
     competitionType: z.nativeEnum(CompetitionType),
     round: z.string().nullable(),
+    phase: z.string(),
     scheduledAt: z.string().datetime(),
     status: z.nativeEnum(MatchStatus),
     venue: z.string(),
@@ -339,6 +341,7 @@ const venuesResponse = z.object({
           id: z.string(),
           venueId: z.string().nullable(),
           name: z.string(),
+          surface: z.string().nullable(),
           generationLabel: z.string().nullable(),
           ageGroupCode: z.string().nullable(),
           playerFormat: z.string(),
@@ -355,22 +358,41 @@ const venuesResponse = z.object({
 
 const standingsResponse = z.object({
   data: z.object({
-    competitionId: z.string().nullable(),
-    competitionName: z.string().nullable(),
-    competitionType: z.nativeEnum(CompetitionType).nullable(),
-    rows: z.array(
+    competitions: z.array(
       z.object({
-        position: z.number(),
-        team: z.string(),
-        played: z.number(),
-        wins: z.number(),
-        draws: z.number(),
-        losses: z.number(),
-        goalsFor: z.number(),
-        goalsAgainst: z.number(),
-        goalDiff: z.number(),
-        points: z.number(),
-        form: z.string(),
+        competitionId: z.string(),
+        competitionName: z.string(),
+        seasonLabel: z.string().nullable().optional(),
+        competitionType: z.nativeEnum(CompetitionType),
+        generations: z.array(
+          z.object({
+            generationYear: z.number().nullable(),
+            generationLabel: z.string(),
+            groups: z.array(
+              z.object({
+                groupId: z.string(),
+                groupLabel: z.string(),
+                rows: z.array(
+                  z.object({
+                    position: z.number(),
+                    teamId: z.string(),
+                    team: z.string(),
+                    profileImageUrl: z.string().nullable(),
+                    played: z.number(),
+                    wins: z.number(),
+                    draws: z.number(),
+                    losses: z.number(),
+                    goalsFor: z.number(),
+                    goalsAgainst: z.number(),
+                    goalDiff: z.number(),
+                    points: z.number(),
+                    form: z.array(z.enum(["W", "D", "L"])),
+                  })
+                ),
+              })
+            ),
+          })
+        ),
       })
     ),
   }),
@@ -1022,7 +1044,9 @@ export function useUpdateMatchDetails(matchId: string) {
       queryClient.invalidateQueries({ queryKey: ["matches"] });
       queryClient.invalidateQueries({ queryKey: ["match-details", matchId] });
       queryClient.invalidateQueries({ queryKey: ["standings"] });
-      queryClient.invalidateQueries({ queryKey: ["competition-draw"] });
+      queryClient.invalidateQueries({ queryKey: ["competition-draw"], refetchType: "all" });
+      queryClient.invalidateQueries({ queryKey: ["draw-competitions"], refetchType: "all" });
+      queryClient.invalidateQueries({ queryKey: ["competitions"] });
     },
   });
 }
@@ -1041,6 +1065,9 @@ export function useResetMatchDetails(matchId: string) {
       queryClient.invalidateQueries({ queryKey: ["match-details", matchId] });
       queryClient.invalidateQueries({ queryKey: ["matches"] });
       queryClient.invalidateQueries({ queryKey: ["standings"] });
+      queryClient.invalidateQueries({ queryKey: ["competition-draw"], refetchType: "all" });
+      queryClient.invalidateQueries({ queryKey: ["draw-competitions"], refetchType: "all" });
+      queryClient.invalidateQueries({ queryKey: ["competitions"] });
     },
   });
 }
@@ -1084,7 +1111,9 @@ export function useUpdateMatch(matchId: string) {
       queryClient.invalidateQueries({ queryKey: ["matches"] });
       queryClient.invalidateQueries({ queryKey: ["match-details", matchId] });
       queryClient.invalidateQueries({ queryKey: ["standings"] });
-      queryClient.invalidateQueries({ queryKey: ["competition-draw"] });
+      queryClient.invalidateQueries({ queryKey: ["competition-draw"], refetchType: "all" });
+      queryClient.invalidateQueries({ queryKey: ["draw-competitions"], refetchType: "all" });
+      queryClient.invalidateQueries({ queryKey: ["competitions"] });
     },
   });
 }
@@ -1253,6 +1282,7 @@ export function useCreatePitch() {
     mutationFn: async (payload: {
       venueId?: string | null;
       name: string;
+      surface?: string | null;
       generationLabel?: string | null;
       ageGroupCode?: string | null;
       playerFormat: string;
@@ -1350,6 +1380,7 @@ export function useUpdatePitch() {
       id: string;
       venueId?: string | null;
       name?: string;
+      surface?: string | null;
       generationLabel?: string | null;
       ageGroupCode?: string | null;
       playerFormat?: string;

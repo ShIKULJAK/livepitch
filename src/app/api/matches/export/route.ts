@@ -2,6 +2,7 @@ import { CompetitionType, MatchStatus } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { listMatchesForExport } from "@/lib/repositories/matches";
+import { getEffectiveMatchStatus } from "@/lib/utils/match-status";
 import { formatDateDDMMYYYY, formatTimeHHMM } from "@/lib/utils/date";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import { prisma } from "@/lib/db/prisma";
@@ -425,7 +426,6 @@ export async function GET(request: Request) {
       ? (rawCompetitionType as CompetitionType)
       : undefined;
   const leagueAndGroupMatches = await listMatchesForExport(currentUser.organizationId, {
-    status,
     competitionId,
     competitionType,
   });
@@ -473,7 +473,11 @@ export async function GET(request: Request) {
       generationYear: item.round.draw.generationYear ?? null,
       round: roundLabel,
       scheduledAt: item.scheduledAt as Date,
-      status: "SCHEDULED" as MatchStatus,
+      status: getEffectiveMatchStatus({
+        scheduledAt: item.scheduledAt as Date,
+        status: MatchStatus.SCHEDULED,
+        regularTimeMinutes: item.round.draw.competition.matchDurationMinutes,
+      }),
       homeScore: null,
       awayScore: null,
       homeTeam: { name: homeName },
@@ -483,7 +487,17 @@ export async function GET(request: Request) {
     };
   });
 
-  let matches = [...leagueAndGroupMatches, ...knockoutMatches].sort(
+  let matches = [
+    ...leagueAndGroupMatches.map((match) => ({
+      ...match,
+      status: getEffectiveMatchStatus({
+        scheduledAt: match.scheduledAt,
+        status: match.status,
+        regularTimeMinutes: match.regularTimeMinutes,
+      }),
+    })),
+    ...knockoutMatches,
+  ].sort(
     (a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
   );
   if (status) {

@@ -3,7 +3,24 @@ import { requireAuth } from "@/lib/auth";
 import { canCreateMatches, canEditEntity } from "@/lib/permissions";
 import { calculatePossessionPercentages } from "@/lib/constants/match";
 import { getMatchDetails, resetMatchDetails, saveMatchDetails } from "@/lib/repositories/matches";
+import { getEffectiveMatchStatus } from "@/lib/utils/match-status";
 import { matchDetailsUpdateSchema } from "@/lib/validation/match-details";
+
+function formatCompetitionPhase(input: { stage?: string | null; round?: string | null }) {
+  if (input.stage === "GROUP_STAGE" && input.round) {
+    const match = input.round.match(/^group\s+([a-z0-9]+)/i);
+    if (match) return `Grupa ${match[1].toUpperCase()}`;
+    return input.round;
+  }
+
+  if (input.stage === "ROUND_OF_16") return "1/8 finale";
+  if (input.stage === "QUARTERFINAL") return "1/4 finale";
+  if (input.stage === "SEMIFINAL") return "1/2 finale";
+  if (input.stage === "FINAL") return "FINALE";
+  if (input.stage === "THIRD_PLACE") return "UTAKMICA ZA 3. MJESTO";
+
+  return input.round ?? "-";
+}
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const currentUser = await requireAuth();
@@ -18,6 +35,11 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   const homeStats = match.teamStats.find((item) => item.teamId === match.homeTeamId);
   const awayStats = match.teamStats.find((item) => item.teamId === match.awayTeamId);
   const possession = calculatePossessionPercentages(homeStats?.possessionSeconds ?? 0, awayStats?.possessionSeconds ?? 0);
+  const effectiveStatus = getEffectiveMatchStatus({
+    scheduledAt: match.scheduledAt,
+    status: match.status,
+    regularTimeMinutes: match.regularTimeMinutes,
+  });
 
   return NextResponse.json({
     data: {
@@ -26,8 +48,9 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       competition: match.competition.name,
       competitionType: match.competition.type,
       round: match.round,
+      phase: formatCompetitionPhase({ stage: match.stage, round: match.round }),
       scheduledAt: match.scheduledAt,
-      status: match.status,
+      status: effectiveStatus,
       venue: match.venue?.name ?? "TBD",
       venueLabel: match.venueLabel ?? null,
       pitchName: match.pitchName ?? null,

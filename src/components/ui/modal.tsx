@@ -9,9 +9,10 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  contentClassName?: string;
 }
 
-export function Modal({ open, onClose, title, children }: ModalProps) {
+export function Modal({ open, onClose, title, children, contentClassName }: ModalProps) {
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -21,12 +22,30 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
 
+  useEffect(() => {
+    if (!open) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 grid place-items-center overflow-x-hidden overflow-y-auto bg-black/55 p-4 backdrop-blur-md"
+      onClick={onClose}
+    >
       <div
-        className={cn("w-full max-w-lg rounded-[20px] border p-5", "bg-[color:var(--surface-1)]")}
+        className={cn(
+          "my-auto w-full max-w-lg rounded-[20px] border p-5",
+          "overflow-x-hidden bg-[color:var(--surface-1)]",
+          contentClassName,
+        )}
         style={{ borderColor: "var(--border)" }}
         role="dialog"
         aria-modal="true"

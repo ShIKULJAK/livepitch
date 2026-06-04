@@ -1,4 +1,4 @@
-import { CompetitionType, MatchStatus, Prisma } from "@prisma/client";
+import { CompetitionType, DrawSourceType, MatchStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import type { z } from "zod";
 import { calculatePossessionPercentages } from "@/lib/constants/match";
@@ -34,6 +34,404 @@ function parseMatchOrder(round: string | null | undefined) {
   if (!match) return null;
   const value = Number(match[1]);
   return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function resolveGroupSourceKey(sourceValue: string) {
+  const match = sourceValue.trim().match(/^([A-Z]+)\s*[12]$/i);
+  return match ? match[1].toUpperCase() : sourceValue.trim().toUpperCase();
+}
+
+function buildKnockoutRoundLabel(order: number) {
+  return `Match ${order}`;
+}
+
+function isKnockoutStage(stage: string | null | undefined) {
+  if (!stage) return false;
+  return parseKnockoutRoundType(stage) !== null;
+}
+
+function isGroupMatchCompleted(match: {
+  homeScore: number | null;
+  awayScore: number | null;
+}) {
+  return match.homeScore !== null && match.awayScore !== null;
+}
+
+function rankGroupStandings(input: {
+  teams: Array<{ id: string; name: string; seedPosition: number | null }>;
+  matches: Array<{
+    homeTeamId: string;
+    awayTeamId: string;
+    homeScore: number | null;
+    awayScore: number | null;
+  }>;
+}) {
+  const table = new Map<
+    string,
+    {
+      teamId: string;
+      teamName: string;
+      seedPosition: number | null;
+      points: number;
+      goalsFor: number;
+      goalsAgainst: number;
+      wins: number;
+    }
+  >();
+
+  for (const team of input.teams) {
+    table.set(team.id, {
+      teamId: team.id,
+      teamName: team.name,
+      seedPosition: team.seedPosition,
+      points: 0,
+      goalsFor: 0,
+      goalsAgainst: 0,
+      wins: 0,
+    });
+  }
+
+  for (const match of input.matches) {
+    if (match.homeScore === null || match.awayScore === null) continue;
+    const home = table.get(match.homeTeamId);
+    const away = table.get(match.awayTeamId);
+    if (!home || !away) continue;
+
+    home.goalsFor += match.homeScore;
+    home.goalsAgainst += match.awayScore;
+    away.goalsFor += match.awayScore;
+    away.goalsAgainst += match.homeScore;
+
+    if (match.homeScore > match.awayScore) {
+      home.points += 3;
+      home.wins += 1;
+    } else if (match.homeScore < match.awayScore) {
+      away.points += 3;
+      away.wins += 1;
+    } else {
+      home.points += 1;
+      away.points += 1;
+    }
+  }
+
+  return Array.from(table.values()).sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    const goalDiffA = a.goalsFor - a.goalsAgainst;
+    const goalDiffB = b.goalsFor - b.goalsAgainst;
+    if (goalDiffB !== goalDiffA) return goalDiffB - goalDiffA;
+    if (b.goalsFor !== a.goalsFor) return b.goalsFor - a.goalsFor;
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    const seedA = a.seedPosition ?? Number.MAX_SAFE_INTEGER;
+    const seedB = b.seedPosition ?? Number.MAX_SAFE_INTEGER;
+    if (seedA !== seedB) return seedA - seedB;
+    return a.teamName.localeCompare(b.teamName);
+  });
+}
+
+async function syncDrawGroupStageProgress(tx: Prisma.TransactionClient, drawId: string | null) {
+  if (!drawId) return;
+
+  const draw = await tx.draw.findUnique({
+    where: { id: drawId },
+    include: {
+      groups: {
+        include: {
+          teams: {
+            include: {
+              team: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+            orderBy: { position: "asc" },
+          },
+        },
+        orderBy: { order: "asc" },
+      },
+      matches: {
+        where: { stage: "GROUP_STAGE" },
+        select: {
+          id: true,
+          drawGroupId: true,
+          homeTeamId: true,
+          awayTeamId: true,
+          homeScore: true,
+          awayScore: true,
+          status: true,
+          scheduledAt: true,
+          regularTimeMinutes: true,
+        },
+      },
+    },
+  });
+
+  if (!draw?.groupStageEnabled || !draw.groups.length || !draw.matches.length) return;
+  if (draw.matches.some((match) => !isGroupMatchCompleted(match))) return;
+
+  const groupAdvancement = new Map<
+    string,
+    {
+      winnerTeamId: string | null;
+      runnerUpTeamId: string | null;
+      orderedTeamIds: string[];
+    }
+  >();
+
+  for (const group of draw.groups) {
+    const standings = rankGroupStandings({
+      teams: group.teams.map((entry) => ({
+        id: entry.team.id,
+        name: entry.team.name,
+        seedPosition: entry.position,
+      })),
+      matches: draw.matches.filter((match) => match.drawGroupId === group.id),
+    });
+
+    groupAdvancement.set(group.name, {
+      winnerTeamId: standings[0]?.teamId ?? null,
+      runnerUpTeamId: standings[1]?.teamId ?? null,
+      orderedTeamIds: standings.map((entry) => entry.teamId),
+    });
+
+    for (let index = 0; index < standings.length; index += 1) {
+      const entry = group.teams.find((item) => item.teamId === standings[index].teamId);
+      if (!entry || entry.position === index + 1) continue;
+      await tx.drawGroupTeam.update({
+        where: { id: entry.id },
+        data: { position: index + 1 },
+      });
+    }
+  }
+
+  const seededKnockoutMatches = await tx.drawKnockoutMatch.findMany({
+    where: {
+      round: { drawId },
+      OR: [
+        { homeSourceType: DrawSourceType.GROUP_WINNER },
+        { homeSourceType: DrawSourceType.GROUP_RUNNER_UP },
+        { awaySourceType: DrawSourceType.GROUP_WINNER },
+        { awaySourceType: DrawSourceType.GROUP_RUNNER_UP },
+      ],
+    },
+    select: {
+      id: true,
+      homeSourceType: true,
+      homeSourceValue: true,
+      awaySourceType: true,
+      awaySourceValue: true,
+      homeTeamId: true,
+      awayTeamId: true,
+    },
+  });
+
+  for (const match of seededKnockoutMatches) {
+    const nextHomeTeamId =
+      match.homeSourceType === DrawSourceType.GROUP_WINNER
+        ? (groupAdvancement.get(resolveGroupSourceKey(match.homeSourceValue))?.winnerTeamId ?? null)
+        : match.homeSourceType === DrawSourceType.GROUP_RUNNER_UP
+          ? (groupAdvancement.get(resolveGroupSourceKey(match.homeSourceValue))?.runnerUpTeamId ?? null)
+          : match.homeTeamId;
+    const nextAwayTeamId =
+      match.awaySourceType === DrawSourceType.GROUP_WINNER
+        ? (groupAdvancement.get(resolveGroupSourceKey(match.awaySourceValue))?.winnerTeamId ?? null)
+        : match.awaySourceType === DrawSourceType.GROUP_RUNNER_UP
+          ? (groupAdvancement.get(resolveGroupSourceKey(match.awaySourceValue))?.runnerUpTeamId ?? null)
+          : match.awayTeamId;
+
+    if (nextHomeTeamId === match.homeTeamId && nextAwayTeamId === match.awayTeamId) continue;
+
+    await tx.drawKnockoutMatch.update({
+      where: { id: match.id },
+      data: {
+        homeTeamId: nextHomeTeamId,
+        awayTeamId: nextAwayTeamId,
+        winnerTeamId: null,
+      },
+    });
+  }
+}
+
+export async function syncMaterializedKnockoutMatches(tx: Prisma.TransactionClient, drawId: string | null) {
+  if (!drawId) return;
+
+  const draw = await tx.draw.findUnique({
+    where: { id: drawId },
+    include: {
+      competition: {
+        select: {
+          id: true,
+          seasonId: true,
+          matchDurationMinutes: true,
+        },
+      },
+      groups: {
+        include: {
+          teams: {
+            include: {
+              team: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+            orderBy: { position: "asc" },
+          },
+        },
+        orderBy: { order: "asc" },
+      },
+      matches: {
+        where: { stage: "GROUP_STAGE" },
+        select: {
+          drawGroupId: true,
+          homeTeamId: true,
+          awayTeamId: true,
+          homeScore: true,
+          awayScore: true,
+        },
+      },
+      knockoutRounds: {
+        include: {
+          matches: {
+            orderBy: { order: "asc" },
+          },
+        },
+        orderBy: { order: "asc" },
+      },
+    },
+  });
+
+  if (!draw?.knockoutRounds.length) return;
+
+  const knockoutStages = Array.from(new Set(draw.knockoutRounds.map((round) => round.roundType)));
+
+  if (draw.groupStageEnabled && draw.groups.length) {
+    const allGroupMatchesCompleted = draw.matches.length > 0 && draw.matches.every((match) => isGroupMatchCompleted(match));
+
+    if (!allGroupMatchesCompleted) {
+      await tx.match.deleteMany({
+        where: {
+          drawId,
+          stage: { in: knockoutStages },
+          NOT: { status: "FINISHED" },
+        },
+      });
+      return;
+    }
+  }
+
+  const groupResolution = new Map<string, { winnerTeamId: string | null; runnerUpTeamId: string | null }>();
+  if (draw.groupStageEnabled && draw.groups.length && draw.matches.length) {
+    for (const group of draw.groups) {
+      const standings = rankGroupStandings({
+        teams: group.teams.map((entry) => ({
+          id: entry.team.id,
+          name: entry.team.name,
+          seedPosition: entry.position,
+        })),
+        matches: draw.matches.filter((match) => match.drawGroupId === group.id),
+      });
+
+      groupResolution.set(group.name.toUpperCase(), {
+        winnerTeamId: standings[0]?.teamId ?? null,
+        runnerUpTeamId: standings[1]?.teamId ?? null,
+      });
+    }
+  }
+
+  const knockoutWinnerRefs = new Map<string, string | null>();
+  for (const round of draw.knockoutRounds) {
+    const code = parseKnockoutRoundType(round.roundType)?.code;
+    if (!code) continue;
+    for (const slot of round.matches) {
+      knockoutWinnerRefs.set(`${code}-${slot.order}`, slot.winnerTeamId ?? null);
+      knockoutWinnerRefs.set(`${code}-${slot.order}-LOSER`, null);
+    }
+  }
+
+  for (const round of draw.knockoutRounds) {
+    for (const slot of round.matches) {
+      if (!slot.scheduledAt) continue;
+
+      const resolvedHomeTeamId =
+        slot.homeTeamId ??
+        (slot.homeSourceType === DrawSourceType.GROUP_WINNER
+          ? (groupResolution.get(resolveGroupSourceKey(slot.homeSourceValue))?.winnerTeamId ?? null)
+          : slot.homeSourceType === DrawSourceType.GROUP_RUNNER_UP
+            ? (groupResolution.get(resolveGroupSourceKey(slot.homeSourceValue))?.runnerUpTeamId ?? null)
+            : slot.homeSourceType === DrawSourceType.MATCH_WINNER
+              ? (knockoutWinnerRefs.get(slot.homeSourceValue) ?? null)
+              : null);
+      const resolvedAwayTeamId =
+        slot.awayTeamId ??
+        (slot.awaySourceType === DrawSourceType.GROUP_WINNER
+          ? (groupResolution.get(resolveGroupSourceKey(slot.awaySourceValue))?.winnerTeamId ?? null)
+          : slot.awaySourceType === DrawSourceType.GROUP_RUNNER_UP
+            ? (groupResolution.get(resolveGroupSourceKey(slot.awaySourceValue))?.runnerUpTeamId ?? null)
+            : slot.awaySourceType === DrawSourceType.MATCH_WINNER
+              ? (knockoutWinnerRefs.get(slot.awaySourceValue) ?? null)
+              : null);
+
+      if (!resolvedHomeTeamId || !resolvedAwayTeamId) continue;
+
+      const roundLabel = buildKnockoutRoundLabel(slot.order);
+      const existing = await tx.match.findFirst({
+        where: {
+          drawId,
+          stage: round.roundType,
+          round: roundLabel,
+        },
+        select: {
+          id: true,
+          status: true,
+          homeScore: true,
+          awayScore: true,
+        },
+      });
+
+      if (!existing) {
+        await tx.match.create({
+          data: {
+            competitionId: draw.competition.id,
+            seasonId: draw.competition.seasonId ?? null,
+            drawId,
+            stage: round.roundType,
+            generationYear: draw.generationYear ?? null,
+            homeTeamId: resolvedHomeTeamId,
+            awayTeamId: resolvedAwayTeamId,
+            round: roundLabel,
+            scheduledAt: slot.scheduledAt,
+            status: "SCHEDULED",
+            regularTimeMinutes: draw.competition.matchDurationMinutes,
+            pitchName: slot.pitchName ?? null,
+            venueLabel: slot.venueLabel ?? null,
+          },
+        });
+        continue;
+      }
+
+      const shouldKeepPlayedValues =
+        existing.status === "FINISHED" || existing.homeScore !== null || existing.awayScore !== null;
+
+      await tx.match.update({
+        where: { id: existing.id },
+        data: {
+          ...(shouldKeepPlayedValues
+            ? {}
+            : {
+                homeTeamId: resolvedHomeTeamId,
+                awayTeamId: resolvedAwayTeamId,
+              }),
+          scheduledAt: slot.scheduledAt,
+          regularTimeMinutes: draw.competition.matchDurationMinutes,
+          pitchName: slot.pitchName ?? null,
+          venueLabel: slot.venueLabel ?? null,
+        },
+      });
+    }
+  }
 }
 
 async function syncDrawKnockoutProgress(
@@ -204,7 +602,16 @@ export async function createMatch(organizationId: string, actorId: string, input
 export async function updateMatch(organizationId: string, actor: { id: string; role: string }, matchId: string, input: MatchUpdate) {
   const existing = await prisma.match.findFirst({
     where: { id: matchId, competition: { organizationId } },
-    select: { id: true, status: true, createdById: true, pitchName: true, venueLabel: true },
+    select: {
+      id: true,
+      status: true,
+      createdById: true,
+      pitchName: true,
+      venueLabel: true,
+      stage: true,
+      homeScore: true,
+      awayScore: true,
+    },
   });
 
   if (!existing) return null;
@@ -216,6 +623,15 @@ export async function updateMatch(organizationId: string, actor: { id: string; r
       ? await assertCompetitionOwnership(organizationId, nextCompetitionId)
       : null;
   if (nextCompetitionId !== undefined && !nextCompetition) throw new Error("Forbidden");
+
+  const resolvedHomeScore = input.homeScore !== undefined ? input.homeScore : existing.homeScore;
+  const resolvedAwayScore = input.awayScore !== undefined ? input.awayScore : existing.awayScore;
+  const shouldAutoFinishGroupMatch =
+    input.status === undefined &&
+    existing.stage === "GROUP_STAGE" &&
+    resolvedHomeScore !== null &&
+    resolvedAwayScore !== null &&
+    (existing.status === "SCHEDULED" || existing.status === "LIVE");
 
   const updated = await prisma.match.update({
     where: { id: existing.id },
@@ -229,7 +645,7 @@ export async function updateMatch(organizationId: string, actor: { id: string; r
       ...(input.venueLabel !== undefined ? { venueLabel: input.venueLabel } : {}),
       ...(input.round !== undefined ? { round: input.round } : {}),
       ...(input.scheduledAt !== undefined ? { scheduledAt: new Date(input.scheduledAt) } : {}),
-      ...(input.status !== undefined ? { status: input.status } : {}),
+      ...(input.status !== undefined ? { status: input.status } : shouldAutoFinishGroupMatch ? { status: "FINISHED" } : {}),
       ...(input.homeScore !== undefined ? { homeScore: input.homeScore } : {}),
       ...(input.awayScore !== undefined ? { awayScore: input.awayScore } : {}),
       ...(input.liveMinute !== undefined ? { liveMinute: input.liveMinute } : {}),
@@ -261,6 +677,7 @@ export async function updateMatch(organizationId: string, actor: { id: string; r
   }
 
   await prisma.$transaction(async (tx) => {
+    await syncDrawGroupStageProgress(tx, (updated as typeof updated & { drawId?: string | null }).drawId ?? null);
     await syncDrawKnockoutProgress(tx, {
       id: updated.id,
       drawId: (updated as typeof updated & { drawId?: string | null }).drawId ?? null,
@@ -272,6 +689,7 @@ export async function updateMatch(organizationId: string, actor: { id: string; r
       awayScore: updated.awayScore,
       status: updated.status,
     });
+    await syncMaterializedKnockoutMatches(tx, (updated as typeof updated & { drawId?: string | null }).drawId ?? null);
   });
 
   return updated;
@@ -423,7 +841,7 @@ export async function saveMatchDetails(
         homeScore: payload.homeScore,
         awayScore: payload.awayScore,
         regularTimeMinutes: payload.regularTimeMinutes,
-        status: match.status === "SCHEDULED" ? "FINISHED" : match.status,
+        status: "FINISHED",
       },
     });
 
@@ -561,6 +979,7 @@ export async function saveMatchDetails(
       }
     }
 
+    await syncDrawGroupStageProgress(tx, (updatedMatch as typeof updatedMatch & { drawId?: string | null }).drawId ?? null);
     await syncDrawKnockoutProgress(tx, {
       id: updatedMatch.id,
       drawId: (updatedMatch as typeof updatedMatch & { drawId?: string | null }).drawId ?? null,
@@ -572,6 +991,7 @@ export async function saveMatchDetails(
       awayScore: updatedMatch.awayScore,
       status: updatedMatch.status,
     });
+    await syncMaterializedKnockoutMatches(tx, (updatedMatch as typeof updatedMatch & { drawId?: string | null }).drawId ?? null);
 
     return updatedMatch;
   });

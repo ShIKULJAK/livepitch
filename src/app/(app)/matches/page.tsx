@@ -186,69 +186,84 @@ function MatchesPageContent() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title={t("matches.title")}
-        description={t("matches.description")}
-        actions={
-          <div className="flex flex-wrap gap-2">
-            {canManage ? (
-              <Link href="/matches/create">
-                <Button variant="primary">Create Match</Button>
-              </Link>
-            ) : null}
-            <Button variant="primary" onClick={() => void exportMatches("csv")}>
-              {t("matches.export")}
-            </Button>
-            <Button variant="secondary" onClick={() => void exportMatches("pdf")}>
-              Export PDF
-            </Button>
-          </div>
-        }
-      />
-
-      <FilterBar>
-        <Select className="w-44" value={competitionTypeFilter} onChange={(event) => setCompetitionTypeFilter(event.currentTarget.value as CompetitionType | "ALL")}>
-          <option value="ALL">Tip meca: svi</option>
-          <option value="TOURNAMENT">Tournament</option>
-          <option value="LEAGUE">League</option>
-          <option value="FRIENDLY_MATCH">Friendly</option>
-        </Select>
-        <Select className="w-56" value={competitionFilter} onChange={(event) => setCompetitionFilter(event.currentTarget.value)}>
-          <option value="ALL">Takmicenje: sva</option>
-          {competitionOptions.map(([id, name]) => (
-            <option key={id} value={id}>
-              {name}
-            </option>
-          ))}
-        </Select>
-        <Select className="w-52" value={generationFilter} onChange={(event) => setGenerationFilter(event.currentTarget.value)}>
-          <option value="ALL">Sve generacije</option>
-          {generationOptions.map((year) => (
-            <option key={year} value={String(year)}>
-              Generacija {year}
-            </option>
-          ))}
-          <option value="NONE">Bez generacije</option>
-        </Select>
-        <input
-          value={searchValue}
-          onChange={(event) => setSearchValue(event.currentTarget.value)}
-          placeholder="Pretraga meceva..."
-          className="h-10 w-64 rounded-md border px-3 text-sm outline-none"
-          style={{
-            borderColor: "var(--border)",
-            backgroundColor: "var(--surface-2)",
-            color: "var(--text-primary)",
-          }}
+      <div
+        className="pointer-events-none fixed inset-x-0 top-24 z-20 lg:left-[250px]"
+        style={{ height: "252px" }}
+      >
+        <div
+          className="mx-auto h-full w-full max-w-[1600px] rounded-[28px] px-4 lg:px-6"
+          style={{ backgroundColor: "var(--bg)" }}
         />
-        <Select className="w-44" value={statusFilter} onChange={(event) => setStatusFilter(event.currentTarget.value as MatchStatus | "ALL")}>
-          <option value="ALL">{t("matches.all")}</option>
-          <option value="LIVE">{t("matches.live")}</option>
-          <option value="SCHEDULED">{t("matches.upcoming")}</option>
-          <option value="FINISHED">{t("matches.finished")}</option>
-          <option value="POSTPONED">Postponed</option>
-        </Select>
-      </FilterBar>
+      </div>
+      <div className="fixed inset-x-0 top-28 z-30 lg:left-[250px] lg:top-28">
+        <div className="mx-auto w-full max-w-[1600px] space-y-4 px-4 pb-3 pt-1 lg:px-6">
+          <PageHeader
+            title={t("matches.title")}
+            description={t("matches.description")}
+            actions={
+              <div className="flex flex-wrap gap-2">
+                {canManage ? (
+                  <Link href="/matches/create">
+                    <Button variant="primary">Create Match</Button>
+                  </Link>
+                ) : null}
+                <Button variant="primary" onClick={() => void exportMatches("csv")}>
+                  {t("matches.export")}
+                </Button>
+                <Button variant="secondary" onClick={() => void exportMatches("pdf")}>
+                  Export PDF
+                </Button>
+              </div>
+            }
+          />
+
+          <FilterBar>
+            <Select className="w-44" value={competitionTypeFilter} onChange={(event) => setCompetitionTypeFilter(event.currentTarget.value as CompetitionType | "ALL")}>
+              <option value="ALL">Tip meca: svi</option>
+              <option value="TOURNAMENT">Tournament</option>
+              <option value="LEAGUE">League</option>
+              <option value="FRIENDLY_MATCH">Friendly</option>
+            </Select>
+            <Select className="w-56" value={competitionFilter} onChange={(event) => setCompetitionFilter(event.currentTarget.value)}>
+              <option value="ALL">Takmicenje: sva</option>
+              {competitionOptions.map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </Select>
+            <Select className="w-52" value={generationFilter} onChange={(event) => setGenerationFilter(event.currentTarget.value)}>
+              <option value="ALL">Sve generacije</option>
+              {generationOptions.map((year) => (
+                <option key={year} value={String(year)}>
+                  Generacija {year}
+                </option>
+              ))}
+              <option value="NONE">Bez generacije</option>
+            </Select>
+            <input
+              value={searchValue}
+              onChange={(event) => setSearchValue(event.currentTarget.value)}
+              placeholder="Pretraga meceva..."
+              className="h-10 w-64 rounded-md border px-3 text-sm outline-none"
+              style={{
+                borderColor: "var(--border)",
+                backgroundColor: "var(--surface-2)",
+                color: "var(--text-primary)",
+              }}
+            />
+            <Select className="w-44" value={statusFilter} onChange={(event) => setStatusFilter(event.currentTarget.value as MatchStatus | "ALL")}>
+              <option value="ALL">{t("matches.all")}</option>
+              <option value="LIVE">{t("matches.live")}</option>
+              <option value="SCHEDULED">{t("matches.upcoming")}</option>
+              <option value="FINISHED">{t("matches.finished")}</option>
+              <option value="POSTPONED">Postponed</option>
+            </Select>
+          </FilterBar>
+        </div>
+      </div>
+
+      <div className="h-[252px] lg:h-[252px]" />
 
       <div className="w-full space-y-4">
         {!matchesQuery.isLoading ? groupedByCompetition.map((competitionEntry) => (
@@ -286,7 +301,7 @@ function MatchesPageContent() {
                       <table className="min-w-full text-sm">
                         <thead className="sticky top-0 z-10" style={{ backgroundColor: "var(--surface-2)" }}>
                           <tr>
-                            {["Datum", t("table.time"), t("table.match"), t("table.tournament"), t("table.venue"), t("table.status"), t("table.action")].map((h) => (
+                            {["Datum", t("table.time"), t("table.match"), "Faza", t("table.tournament"), t("table.venue"), t("table.status"), t("table.action")].map((h) => (
                               <th key={h} className="px-4 py-3 text-center text-xs uppercase" style={{ color: "var(--text-secondary)" }}>
                                 {h}
                               </th>
@@ -327,6 +342,7 @@ function MatchesPageContent() {
                                       </div>
                                     </div>
                                   </td>
+                                  <td className="px-4 py-3 text-center">{match.phase}</td>
                                   <td className="px-4 py-3 text-center">{match.competition}</td>
                                   <td className="px-4 py-3 text-center">{match.venue}</td>
                                   <td className="px-4 py-3 text-center">

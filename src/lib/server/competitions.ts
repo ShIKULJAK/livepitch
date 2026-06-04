@@ -1,6 +1,8 @@
-import { CompetitionStatus, CompetitionType, Prisma } from "@prisma/client";
+import { CompetitionStatus, CompetitionType, MatchStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { canEditEntity } from "@/lib/permissions";
+import { syncMaterializedKnockoutMatches } from "@/lib/repositories/matches";
+import { getEffectiveMatchStatus } from "@/lib/utils/match-status";
 import type { CreateCompetitionInput } from "@/lib/validation/competition";
 
 const defaultOrganizationName = "FC Champion";
@@ -273,6 +275,93 @@ type ScheduleDayRaw = {
   endTime?: string;
 };
 type GenerationMatchDurationRaw = { generationLabel?: string; matchDurationMinutes?: number };
+
+function resolveGroupSourceKey(sourceValue: string) {
+  const match = sourceValue.trim().match(/^([A-Z]+)\s*[12]$/i);
+  return match ? match[1].toUpperCase() : sourceValue.trim().toUpperCase();
+}
+
+function computeDrawGroupStandings(input: {
+  teams: Array<{ id: string; name: string; profileImageUrl: string | null; position: number | null }>;
+  matches: Array<{ homeTeamId: string; awayTeamId: string; homeScore: number | null; awayScore: number | null }>;
+}) {
+  const table = new Map(
+    input.teams.map((team) => [
+      team.id,
+      {
+        teamId: team.id,
+        teamName: team.name,
+        profileImageUrl: team.profileImageUrl,
+        seedPosition: team.position,
+        points: 0,
+        goalsFor: 0,
+        goalsAgainst: 0,
+        wins: 0,
+      },
+    ])
+  );
+
+  for (const match of input.matches) {
+    if (match.homeScore === null || match.awayScore === null) continue;
+    const home = table.get(match.homeTeamId);
+    const away = table.get(match.awayTeamId);
+    if (!home || !away) continue;
+
+    home.goalsFor += match.homeScore;
+    home.goalsAgainst += match.awayScore;
+    away.goalsFor += match.awayScore;
+    away.goalsAgainst += match.homeScore;
+
+    if (match.homeScore > match.awayScore) {
+      home.points += 3;
+      home.wins += 1;
+    } else if (match.homeScore < match.awayScore) {
+      away.points += 3;
+      away.wins += 1;
+    } else {
+      home.points += 1;
+      away.points += 1;
+    }
+  }
+
+  return Array.from(table.values()).sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    const goalDiffA = a.goalsFor - a.goalsAgainst;
+    const goalDiffB = b.goalsFor - b.goalsAgainst;
+    if (goalDiffB !== goalDiffA) return goalDiffB - goalDiffA;
+    if (b.goalsFor !== a.goalsFor) return b.goalsFor - a.goalsFor;
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    const seedA = a.seedPosition ?? Number.MAX_SAFE_INTEGER;
+    const seedB = b.seedPosition ?? Number.MAX_SAFE_INTEGER;
+    if (seedA !== seedB) return seedA - seedB;
+    return a.teamName.localeCompare(b.teamName);
+  });
+}
+
+function buildKnockoutMaterializationKey(drawId: string, stage: string, round: string) {
+  return `${drawId}::${stage}::${round}`;
+}
+
+function isKnockoutStage(stage: string | null | undefined) {
+  return stage === "ROUND_OF_16" || stage === "QUARTERFINAL" || stage === "SEMIFINAL" || stage === "FINAL" || stage === "THIRD_PLACE";
+}
+
+function formatCompetitionPhase(input: { stage?: string | null; round?: string | null; knockoutRoundType?: string | null }) {
+  if (input.stage === "GROUP_STAGE" && input.round) {
+    const match = input.round.match(/^group\s+([a-z0-9]+)/i);
+    if (match) return `Grupa ${match[1].toUpperCase()}`;
+    return input.round;
+  }
+
+  const knockoutType = input.knockoutRoundType ?? input.stage;
+  if (knockoutType === "ROUND_OF_16") return "1/8 finale";
+  if (knockoutType === "QUARTERFINAL") return "1/4 finale";
+  if (knockoutType === "SEMIFINAL") return "1/2 finale";
+  if (knockoutType === "FINAL") return "FINALE";
+  if (knockoutType === "THIRD_PLACE") return "UTAKMICA ZA 3. MJESTO";
+
+  return input.round ?? "-";
+}
 
 function normalizeScheduleDays(value: unknown) {
   const fallback = [{ dayLabel: "Dan 1", dayDate: new Date().toISOString().slice(0, 10), generationLabel: "Sve generacije", stageScope: "ALL" as const, pitchId: null, startTime: "09:00", endTime: "19:00" }];
@@ -689,9 +778,22 @@ export async function listMatches(
     competitionId?: string;
   }
 ) {
+  const drawsToMaterialize = await prisma.draw.findMany({
+    where: {
+      knockoutRounds: { some: { matches: { some: { scheduledAt: { not: null } } } } },
+      ...(filters?.competitionId ? { competitionId: filters.competitionId } : {}),
+    },
+    select: { id: true },
+  });
+
+  for (const draw of drawsToMaterialize) {
+    await prisma.$transaction(async (tx) => {
+      await syncMaterializedKnockoutMatches(tx, draw.id);
+    });
+  }
+
   const matches = await prisma.match.findMany({
     where: {
-      ...(filters?.status ? { status: filters.status } : {}),
       ...(filters?.competitionId ? { competitionId: filters.competitionId } : {}),
     },
     include: {
@@ -703,7 +805,7 @@ export async function listMatches(
     orderBy: { scheduledAt: "asc" },
   });
 
-  const includeKnockout = !filters?.status || filters.status === "SCHEDULED";
+  const includeKnockout = !filters?.status || filters.status === "SCHEDULED" || filters.status === "FINISHED";
   const knockoutMatches = includeKnockout
     ? await prisma.drawKnockoutMatch.findMany({
         where: {
@@ -735,6 +837,93 @@ export async function listMatches(
       })
     : [];
 
+  const drawIds = Array.from(new Set(knockoutMatches.map((match) => match.round.draw.id)));
+  const drawsForResolution = drawIds.length
+    ? await prisma.draw.findMany({
+        where: { id: { in: drawIds } },
+        include: {
+          groups: {
+            include: {
+              teams: {
+                include: {
+                  team: {
+                    select: { id: true, name: true, profileImageUrl: true },
+                  },
+                },
+                orderBy: { position: "asc" },
+              },
+            },
+            orderBy: { order: "asc" },
+          },
+          matches: {
+            where: { stage: "GROUP_STAGE" },
+            select: {
+              drawGroupId: true,
+              homeTeamId: true,
+              awayTeamId: true,
+              homeScore: true,
+              awayScore: true,
+            },
+          },
+        },
+      })
+    : [];
+
+  const drawGroupResolution = new Map<
+    string,
+    Map<
+      string,
+      {
+        winner: { id: string; name: string; profileImageUrl: string | null } | null;
+        runnerUp: { id: string; name: string; profileImageUrl: string | null } | null;
+      }
+    >
+  >();
+
+  for (const draw of drawsForResolution) {
+    if (!draw.groupStageEnabled || !draw.groups.length || !draw.matches.length) continue;
+    if (draw.matches.some((match) => match.homeScore === null || match.awayScore === null)) continue;
+
+    const perGroup = new Map<
+      string,
+      {
+        winner: { id: string; name: string; profileImageUrl: string | null } | null;
+        runnerUp: { id: string; name: string; profileImageUrl: string | null } | null;
+      }
+    >();
+
+    for (const group of draw.groups) {
+      const standings = computeDrawGroupStandings({
+        teams: group.teams.map((entry) => ({
+          id: entry.team.id,
+          name: entry.team.name,
+          profileImageUrl: entry.team.profileImageUrl ?? null,
+          position: entry.position,
+        })),
+        matches: draw.matches.filter((match) => match.drawGroupId === group.id),
+      });
+
+      perGroup.set(group.name.toUpperCase(), {
+        winner: standings[0]
+          ? {
+              id: standings[0].teamId,
+              name: standings[0].teamName,
+              profileImageUrl: standings[0].profileImageUrl,
+            }
+          : null,
+        runnerUp: standings[1]
+          ? {
+              id: standings[1].teamId,
+              name: standings[1].teamName,
+              profileImageUrl: standings[1].profileImageUrl,
+            }
+          : null,
+      });
+    }
+
+    drawGroupResolution.set(draw.id, perGroup);
+  }
+
   const regularRows = matches.map((match) => ({
     id: match.id,
     createdById: match.createdById,
@@ -745,8 +934,13 @@ export async function listMatches(
     competitionType: match.competition.type,
     generationYear: match.generationYear ?? null,
     round: match.round,
+    phase: formatCompetitionPhase({ stage: match.stage, round: match.round }),
     scheduledAt: match.scheduledAt,
-    status: match.status,
+    status: getEffectiveMatchStatus({
+      scheduledAt: match.scheduledAt,
+      status: match.status,
+      regularTimeMinutes: match.regularTimeMinutes,
+    }),
     homeTeamId: match.homeTeamId,
     awayTeamId: match.awayTeamId,
     homeTeam: match.homeTeam.name,
@@ -762,19 +956,43 @@ export async function listMatches(
     pitchName: match.pitchName ?? null,
   }));
 
-  const knockoutRows = knockoutMatches.map((match) => {
+  const materializedKnockoutKeys = new Set(
+    matches
+      .filter((match) => match.drawId && isKnockoutStage(match.stage) && match.round)
+      .map((match) => buildKnockoutMaterializationKey(match.drawId as string, match.stage as string, match.round as string))
+  );
+
+  const knockoutRows = knockoutMatches.flatMap((match) => {
     const competition = match.round.draw.competition;
+    const groupResolution = drawGroupResolution.get(match.round.draw.id);
+    const resolvedHomeTeam =
+      match.homeTeam ??
+      (match.homeSourceType === "GROUP_WINNER"
+        ? (groupResolution?.get(resolveGroupSourceKey(match.homeSourceValue))?.winner ?? null)
+        : match.homeSourceType === "GROUP_RUNNER_UP"
+          ? (groupResolution?.get(resolveGroupSourceKey(match.homeSourceValue))?.runnerUp ?? null)
+          : null);
+    const resolvedAwayTeam =
+      match.awayTeam ??
+      (match.awaySourceType === "GROUP_WINNER"
+        ? (groupResolution?.get(resolveGroupSourceKey(match.awaySourceValue))?.winner ?? null)
+        : match.awaySourceType === "GROUP_RUNNER_UP"
+          ? (groupResolution?.get(resolveGroupSourceKey(match.awaySourceValue))?.runnerUp ?? null)
+          : null);
     const roundTypeLabel =
       match.round.roundType === "ROUND_OF_16"
-        ? "1/8 FINALA"
+        ? "1/8 finale"
         : match.round.roundType === "QUARTERFINAL"
-          ? "1/4 FINALA"
+          ? "1/4 finale"
           : match.round.roundType === "SEMIFINAL"
-            ? "1/2 FINALA"
+            ? "1/2 finale"
             : match.round.roundType === "FINAL"
               ? "FINALE"
               : "UTAKMICA ZA 3. MJESTO";
-    return {
+    const materializationKey = buildKnockoutMaterializationKey(match.round.draw.id, match.round.roundType, `Match ${match.order}`);
+    if (materializedKnockoutKeys.has(materializationKey)) return [];
+
+    return [{
       id: `ko-${match.id}`,
       createdById: competition.createdById,
       competitionId: competition.id,
@@ -784,14 +1002,19 @@ export async function listMatches(
       competitionType: competition.type,
       generationYear: match.round.draw.generationYear ?? null,
       round: `${roundTypeLabel} - Utakmica ${match.order}`,
+      phase: formatCompetitionPhase({ knockoutRoundType: match.round.roundType }),
       scheduledAt: match.scheduledAt as Date,
-      status: "SCHEDULED" as const,
-      homeTeamId: match.homeTeamId ?? `source-${match.id}-home`,
-      awayTeamId: match.awayTeamId ?? `source-${match.id}-away`,
-      homeTeam: match.homeTeam?.name ?? match.homeSourceValue,
-      awayTeam: match.awayTeam?.name ?? match.awaySourceValue,
-      homeTeamProfileImageUrl: match.homeTeam?.profileImageUrl ?? null,
-      awayTeamProfileImageUrl: match.awayTeam?.profileImageUrl ?? null,
+      status: getEffectiveMatchStatus({
+        scheduledAt: match.scheduledAt as Date,
+        status: MatchStatus.SCHEDULED,
+        regularTimeMinutes: competition.matchDurationMinutes,
+      }),
+      homeTeamId: resolvedHomeTeam?.id ?? match.homeTeamId ?? `source-${match.id}-home`,
+      awayTeamId: resolvedAwayTeam?.id ?? match.awayTeamId ?? `source-${match.id}-away`,
+      homeTeam: resolvedHomeTeam?.name ?? match.homeSourceValue,
+      awayTeam: resolvedAwayTeam?.name ?? match.awaySourceValue,
+      homeTeamProfileImageUrl: resolvedHomeTeam?.profileImageUrl ?? null,
+      awayTeamProfileImageUrl: resolvedAwayTeam?.profileImageUrl ?? null,
       homeScore: null,
       awayScore: null,
       liveMinute: null,
@@ -800,10 +1023,12 @@ export async function listMatches(
       venueLabel: match.venueLabel ?? null,
       pitchName: match.pitchName ?? null,
       isVirtualKnockout: true,
-    };
+    }];
   });
 
-  return [...regularRows, ...knockoutRows].sort((a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime());
+  return [...regularRows, ...knockoutRows]
+    .filter((match) => !filters?.status || match.status === filters.status)
+    .sort((a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime());
 }
 
 export async function getSeasonTeamPlayerRegistrations(organizationId: string, competitionId: string) {
@@ -1024,6 +1249,7 @@ export async function createPitch(
   input: {
     venueId?: string | null;
     name: string;
+    surface?: string | null;
     generationLabel?: string | null;
     ageGroupCode?: string | null;
     playerFormat: string;
@@ -1039,6 +1265,7 @@ export async function createPitch(
       organizationId,
       venueId: input.venueId ?? null,
       name: input.name,
+      surface: input.surface ?? null,
       generationLabel: input.generationLabel ?? null,
       ageGroupCode: input.ageGroupCode ?? null,
       playerFormat: input.playerFormat,
@@ -1057,6 +1284,7 @@ export async function updatePitch(
   input: {
     venueId?: string | null;
     name?: string;
+    surface?: string | null;
     generationLabel?: string | null;
     ageGroupCode?: string | null;
     playerFormat?: string;
@@ -1074,6 +1302,7 @@ export async function updatePitch(
     data: {
       ...(input.venueId !== undefined ? { venueId: input.venueId } : {}),
       ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.surface !== undefined ? { surface: input.surface } : {}),
       ...(input.generationLabel !== undefined ? { generationLabel: input.generationLabel } : {}),
       ...(input.ageGroupCode !== undefined ? { ageGroupCode: input.ageGroupCode } : {}),
       ...(input.playerFormat !== undefined ? { playerFormat: input.playerFormat } : {}),
@@ -1093,55 +1322,120 @@ export async function deletePitch(organizationId: string, pitchId: string) {
 }
 
 export async function listStandings(organizationId: string, competitionId?: string) {
-  const competition =
-    competitionId
-      ? await prisma.competition.findFirst({ where: { id: competitionId, organizationId } })
-      : await prisma.competition.findFirst({
-          where: { organizationId, type: { in: [CompetitionType.LEAGUE, CompetitionType.TOURNAMENT] } },
-          orderBy: { createdAt: "desc" },
-        });
-
-  if (!competition) {
-    return { competitionId: null, competitionName: null, competitionType: null, rows: [] };
-  }
-
-  if (competition.type === "LEAGUE") {
-    const [participants, finishedMatches] = await Promise.all([
-      prisma.competitionTeam.findMany({
-        where: { competitionId: competition.id },
-        include: { team: true },
-      }),
-      prisma.match.findMany({
+  const competitions = await prisma.competition.findMany({
+    where: {
+      organizationId,
+      type: { in: [CompetitionType.LEAGUE, CompetitionType.TOURNAMENT] },
+      ...(competitionId ? { id: competitionId } : {}),
+    },
+    include: {
+      season: { select: { name: true } },
+      teams: {
+        include: {
+          team: {
+            select: { id: true, name: true, profileImageUrl: true },
+          },
+        },
+      },
+      teamGenerations: {
+        where: { isApproved: true },
+        include: {
+          team: {
+            select: { id: true, name: true, profileImageUrl: true },
+          },
+        },
+      },
+      matches: {
         where: {
-          competitionId: competition.id,
-          status: "FINISHED",
           homeScore: { not: null },
           awayScore: { not: null },
         },
-        include: {
-          homeTeam: { select: { id: true, name: true } },
-          awayTeam: { select: { id: true, name: true } },
+        select: {
+          homeTeamId: true,
+          awayTeamId: true,
+          homeScore: true,
+          awayScore: true,
+          scheduledAt: true,
+          generationYear: true,
+          drawGroupId: true,
+          stage: true,
         },
-      }),
-    ]);
+        orderBy: { scheduledAt: "asc" },
+      },
+      draws: {
+        include: {
+          groups: {
+            include: {
+              teams: {
+                include: {
+                  team: {
+                    select: { id: true, name: true, profileImageUrl: true },
+                  },
+                },
+                orderBy: { position: "asc" },
+              },
+            },
+            orderBy: { order: "asc" },
+          },
+        },
+        orderBy: [{ generationYear: "desc" }, { createdAt: "desc" }],
+      },
+    },
+    orderBy: [{ createdAt: "desc" }],
+  });
 
-    const table = new Map<string, {
-      teamId: string;
-      team: string;
-      played: number;
-      wins: number;
-      draws: number;
-      losses: number;
-      goalsFor: number;
-      goalsAgainst: number;
-      points: number;
-      form: string;
-    }>();
+  type FormResult = "W" | "D" | "L";
+  type TableRow = {
+    position: number;
+    teamId: string;
+    team: string;
+    profileImageUrl: string | null;
+    played: number;
+    wins: number;
+    draws: number;
+    losses: number;
+    goalsFor: number;
+    goalsAgainst: number;
+    goalDiff: number;
+    points: number;
+    form: FormResult[];
+  };
+  type TeamSeed = { id: string; name: string; profileImageUrl: string | null; seedPosition?: number | null };
 
-    for (const participant of participants) {
-      table.set(participant.teamId, {
-        teamId: participant.teamId,
-        team: participant.team.name,
+  function computeTableRows(input: {
+    teams: TeamSeed[];
+    matches: Array<{
+      homeTeamId: string;
+      awayTeamId: string;
+      homeScore: number | null;
+      awayScore: number | null;
+      scheduledAt: Date;
+    }>;
+  }): TableRow[] {
+    const table = new Map<
+      string,
+      {
+        teamId: string;
+        team: string;
+        profileImageUrl: string | null;
+        seedPosition: number | null;
+        played: number;
+        wins: number;
+        draws: number;
+        losses: number;
+        goalsFor: number;
+        goalsAgainst: number;
+        points: number;
+        form: FormResult[];
+      }
+    >();
+
+    for (const team of input.teams) {
+      table.set(team.id, {
+        teamId: team.id,
+        team: team.name,
+        profileImageUrl: team.profileImageUrl,
+        seedPosition: team.seedPosition ?? null,
         played: 0,
         wins: 0,
         draws: 0,
@@ -1149,81 +1443,63 @@ export async function listStandings(organizationId: string, competitionId?: stri
         goalsFor: 0,
         goalsAgainst: 0,
         points: 0,
-        form: "",
+        form: [],
       });
     }
 
-    for (const match of finishedMatches) {
-      const home = table.get(match.homeTeamId) ?? {
-        teamId: match.homeTeamId,
-        team: match.homeTeam.name,
-        played: 0,
-        wins: 0,
-        draws: 0,
-        losses: 0,
-        goalsFor: 0,
-        goalsAgainst: 0,
-        points: 0,
-        form: "",
-      };
-      const away = table.get(match.awayTeamId) ?? {
-        teamId: match.awayTeamId,
-        team: match.awayTeam.name,
-        played: 0,
-        wins: 0,
-        draws: 0,
-        losses: 0,
-        goalsFor: 0,
-        goalsAgainst: 0,
-        points: 0,
-        form: "",
-      };
-
-      const homeScore = match.homeScore ?? 0;
-      const awayScore = match.awayScore ?? 0;
+    for (const match of input.matches) {
+      if (match.homeScore === null || match.awayScore === null) continue;
+      const home = table.get(match.homeTeamId);
+      const away = table.get(match.awayTeamId);
+      if (!home || !away) continue;
 
       home.played += 1;
       away.played += 1;
-      home.goalsFor += homeScore;
-      home.goalsAgainst += awayScore;
-      away.goalsFor += awayScore;
-      away.goalsAgainst += homeScore;
+      home.goalsFor += match.homeScore;
+      home.goalsAgainst += match.awayScore;
+      away.goalsFor += match.awayScore;
+      away.goalsAgainst += match.homeScore;
 
-      if (homeScore > awayScore) {
+      if (match.homeScore > match.awayScore) {
         home.wins += 1;
         home.points += 3;
         away.losses += 1;
-      } else if (homeScore < awayScore) {
+        home.form.push("W");
+        away.form.push("L");
+      } else if (match.homeScore < match.awayScore) {
         away.wins += 1;
         away.points += 3;
         home.losses += 1;
+        home.form.push("L");
+        away.form.push("W");
       } else {
         home.draws += 1;
         away.draws += 1;
         home.points += 1;
         away.points += 1;
+        home.form.push("D");
+        away.form.push("D");
       }
-
-      table.set(home.teamId, home);
-      table.set(away.teamId, away);
     }
 
-    const sorted = Array.from(table.values()).sort((a, b) => {
-      if (b.points !== a.points) return b.points - a.points;
-      const aGoalDiff = a.goalsFor - a.goalsAgainst;
-      const bGoalDiff = b.goalsFor - b.goalsAgainst;
-      if (bGoalDiff !== aGoalDiff) return bGoalDiff - aGoalDiff;
-      if (b.goalsFor !== a.goalsFor) return b.goalsFor - a.goalsFor;
-      return a.team.localeCompare(b.team);
-    });
-
-    return {
-      competitionId: competition.id,
-      competitionName: competition.name,
-      competitionType: competition.type,
-      rows: sorted.map((row, index) => ({
+    return Array.from(table.values())
+      .sort((a, b) => {
+        if (b.points !== a.points) return b.points - a.points;
+        const goalDiffA = a.goalsFor - a.goalsAgainst;
+        const goalDiffB = b.goalsFor - b.goalsAgainst;
+        if (goalDiffB !== goalDiffA) return goalDiffB - goalDiffA;
+        if (b.goalsFor !== a.goalsFor) return b.goalsFor - a.goalsFor;
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        const seedA = a.seedPosition ?? Number.MAX_SAFE_INTEGER;
+        const seedB = b.seedPosition ?? Number.MAX_SAFE_INTEGER;
+        if (seedA !== seedB) return seedA - seedB;
+        return a.team.localeCompare(b.team);
+      })
+      .map((row, index) => ({
         position: index + 1,
+        teamId: row.teamId,
         team: row.team,
+        profileImageUrl: row.profileImageUrl,
         played: row.played,
         wins: row.wins,
         draws: row.draws,
@@ -1232,42 +1508,163 @@ export async function listStandings(organizationId: string, competitionId?: stri
         goalsAgainst: row.goalsAgainst,
         goalDiff: row.goalsFor - row.goalsAgainst,
         points: row.points,
-        form: row.form,
-      })),
-    };
+        form: row.form.slice(-5),
+      }));
   }
 
-  const rows = await prisma.standing.findMany({
-    where: { competitionId: competition.id },
-    include: { team: true },
-  });
+  const standingsCompetitions = competitions.map((competition) => {
+    if (competition.type === CompetitionType.LEAGUE) {
+      const rows = computeTableRows({
+        teams: competition.teams.map((entry) => ({
+          id: entry.team.id,
+          name: entry.team.name,
+          profileImageUrl: entry.team.profileImageUrl ?? null,
+          seedPosition: entry.seed ?? null,
+        })),
+        matches: competition.matches.map((match) => ({
+          homeTeamId: match.homeTeamId,
+          awayTeamId: match.awayTeamId,
+          homeScore: match.homeScore,
+          awayScore: match.awayScore,
+          scheduledAt: match.scheduledAt,
+        })),
+      });
 
-  const sortedRows = [...rows].sort((a, b) => {
-    if (b.points !== a.points) return b.points - a.points;
-    const aGoalDiff = a.goalsFor - a.goalsAgainst;
-    const bGoalDiff = b.goalsFor - b.goalsAgainst;
-    if (bGoalDiff !== aGoalDiff) return bGoalDiff - aGoalDiff;
-    if (b.goalsFor !== a.goalsFor) return b.goalsFor - a.goalsFor;
-    return a.team.name.localeCompare(b.team.name);
+      return {
+        competitionId: competition.id,
+        competitionName: competition.name,
+        seasonLabel: competition.season?.name ?? null,
+        competitionType: competition.type,
+        generations: [
+          {
+            generationYear: null,
+            generationLabel: "Tabela",
+            groups: [
+              {
+                groupId: `${competition.id}-overall`,
+                groupLabel: "Ukupni poredak",
+                rows,
+              },
+            ],
+          },
+        ],
+      };
+    }
+
+    const drawGenerations = competition.draws.map((draw) => {
+      const generationTeams =
+        draw.generationYear !== null
+          ? competition.teamGenerations
+              .filter((entry) => entry.generationYear === draw.generationYear)
+              .map((entry) => ({
+                id: entry.team.id,
+                name: entry.team.name,
+                profileImageUrl: entry.team.profileImageUrl ?? null,
+              }))
+          : competition.teams.map((entry) => ({
+              id: entry.team.id,
+              name: entry.team.name,
+              profileImageUrl: entry.team.profileImageUrl ?? null,
+            }));
+
+      const groups = draw.groups.length
+        ? draw.groups.map((group) => ({
+            groupId: group.id,
+            groupLabel: `Grupa ${group.name.toUpperCase()}`,
+            rows: computeTableRows({
+              teams: group.teams.map((entry) => ({
+                id: entry.team.id,
+                name: entry.team.name,
+                profileImageUrl: entry.team.profileImageUrl ?? null,
+                seedPosition: entry.position ?? null,
+              })),
+              matches: competition.matches
+                .filter((match) => match.generationYear === draw.generationYear && match.drawGroupId === group.id)
+                .map((match) => ({
+                  homeTeamId: match.homeTeamId,
+                  awayTeamId: match.awayTeamId,
+                  homeScore: match.homeScore,
+                  awayScore: match.awayScore,
+                  scheduledAt: match.scheduledAt,
+                })),
+            }),
+          }))
+        : [
+            {
+              groupId: `${draw.id}-overall`,
+              groupLabel: "Ukupni poredak",
+              rows: computeTableRows({
+                teams: generationTeams,
+                matches: competition.matches
+                  .filter((match) => match.generationYear === draw.generationYear && match.stage !== "GROUP_STAGE")
+                  .map((match) => ({
+                    homeTeamId: match.homeTeamId,
+                    awayTeamId: match.awayTeamId,
+                    homeScore: match.homeScore,
+                    awayScore: match.awayScore,
+                    scheduledAt: match.scheduledAt,
+                  })),
+              }),
+            },
+          ];
+
+      return {
+        generationYear: draw.generationYear ?? null,
+        generationLabel: draw.generationYear ? `Generacija ${draw.generationYear}` : "Bez generacije",
+        groups,
+      };
+    });
+
+    const uncoveredGenerationYears = Array.from(
+      new Set(competition.teamGenerations.map((entry) => entry.generationYear).filter((year) => !competition.draws.some((draw) => draw.generationYear === year)))
+    )
+      .sort((a, b) => b - a)
+      .map((generationYear) => ({
+        generationYear,
+        generationLabel: `Generacija ${generationYear}`,
+        groups: [
+          {
+            groupId: `${competition.id}-${generationYear}-overall`,
+            groupLabel: "Ukupni poredak",
+            rows: computeTableRows({
+              teams: competition.teamGenerations
+                .filter((entry) => entry.generationYear === generationYear)
+                .map((entry) => ({
+                  id: entry.team.id,
+                  name: entry.team.name,
+                  profileImageUrl: entry.team.profileImageUrl ?? null,
+                })),
+              matches: competition.matches
+                .filter((match) => match.generationYear === generationYear)
+                .map((match) => ({
+                  homeTeamId: match.homeTeamId,
+                  awayTeamId: match.awayTeamId,
+                  homeScore: match.homeScore,
+                  awayScore: match.awayScore,
+                  scheduledAt: match.scheduledAt,
+                })),
+            }),
+          },
+        ],
+      }));
+
+    return {
+      competitionId: competition.id,
+      competitionName: competition.name,
+      seasonLabel: competition.season?.name ?? null,
+      competitionType: competition.type,
+      generations: [...drawGenerations, ...uncoveredGenerationYears].sort((a, b) => {
+        const aYear = a.generationYear ?? -1;
+        const bYear = b.generationYear ?? -1;
+        return bYear - aYear;
+      }),
+    };
   });
 
   return {
-    competitionId: competition.id,
-    competitionName: competition.name,
-    competitionType: competition.type,
-    rows: sortedRows.map((row, index) => ({
-      position: index + 1,
-      team: row.team.name,
-      played: row.played,
-      wins: row.wins,
-      draws: row.draws,
-      losses: row.losses,
-      goalsFor: row.goalsFor,
-      goalsAgainst: row.goalsAgainst,
-      goalDiff: row.goalsFor - row.goalsAgainst,
-      points: row.points,
-      form: row.form,
-    })),
+    competitions: standingsCompetitions.filter((competition) =>
+      competition.generations.some((generation) => generation.groups.some((group) => group.rows.length > 0))
+    ),
   };
 }
 

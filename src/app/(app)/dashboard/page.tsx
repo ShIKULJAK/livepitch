@@ -24,7 +24,16 @@ export default function DashboardPage() {
   const snapshot = dashboardQuery.data;
   const matches = matchesQuery.data ?? [];
   const players = playersQuery.data ?? [];
-  const standings = standingsQuery.data?.rows ?? [];
+  const standings =
+    standingsQuery.data?.competitions
+      .flatMap((competition) => competition.generations)
+      .flatMap((generation) => generation.groups)
+      .flatMap((group) => group.rows)[0]
+      ? standingsQuery.data.competitions
+          .flatMap((competition) => competition.generations)
+          .flatMap((generation) => generation.groups)
+          .flatMap((group) => group.rows)
+      : [];
 
   const activities = matches.slice(0, 4).map((match) => {
     if (match.status === "LIVE" && match.homeScore !== null && match.awayScore !== null) {

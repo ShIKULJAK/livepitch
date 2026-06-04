@@ -559,8 +559,8 @@ const favoritesResponse = z.object({
       z.object({
         id: z.string(),
         competition: z.object({ id: z.string(), name: z.string() }),
-        homeTeam: z.object({ id: z.string(), name: z.string() }),
-        awayTeam: z.object({ id: z.string(), name: z.string() }),
+        homeTeam: z.object({ id: z.string(), name: z.string(), profileImageUrl: z.string().nullable().optional() }),
+        awayTeam: z.object({ id: z.string(), name: z.string(), profileImageUrl: z.string().nullable().optional() }),
       })
     ),
     competitions: z.array(z.object({ id: z.string(), name: z.string(), type: z.nativeEnum(CompetitionType) })),

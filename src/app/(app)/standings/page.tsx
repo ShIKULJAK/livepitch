@@ -5,14 +5,7 @@ import { useStandings } from "@/hooks/use-competitions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
-
-function TeamBadge({ name, profileImageUrl }: { name: string; profileImageUrl?: string | null }) {
-  if (profileImageUrl) {
-    return <img src={profileImageUrl} alt={name} className="h-5 w-5 rounded-full object-cover" loading="lazy" />;
-  }
-
-  return <span className="inline-flex h-5 w-5 items-center justify-center text-xs">🛡️</span>;
-}
+import { TeamAvatar } from "@/components/teams/team-identity";
 
 function FormBadge({ result }: { result: "W" | "D" | "L" }) {
   const palette =
@@ -170,7 +163,7 @@ export default function StandingsPage() {
                                                 <td className="px-4 py-3 text-center font-medium">{row.position}</td>
                                                 <td className="px-4 py-3">
                                                   <div className="flex items-center gap-2 truncate font-medium">
-                                                    <TeamBadge name={row.team} profileImageUrl={row.profileImageUrl} />
+                                                    <TeamAvatar name={row.team} profileImageUrl={row.profileImageUrl} size="md" />
                                                     <span className="truncate">{row.team}</span>
                                                   </div>
                                                 </td>

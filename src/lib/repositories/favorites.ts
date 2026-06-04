@@ -23,8 +23,8 @@ export async function listFavorites(userId: string, organizationId: string) {
           where: { id: { in: matchIds }, competition: { organizationId } },
           include: {
             competition: { select: { id: true, name: true } },
-            homeTeam: { select: { id: true, name: true } },
-            awayTeam: { select: { id: true, name: true } },
+            homeTeam: { select: { id: true, name: true, profileImageUrl: true } },
+            awayTeam: { select: { id: true, name: true, profileImageUrl: true } },
           },
         })
       : Promise.resolve([]),

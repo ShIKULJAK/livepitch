@@ -18,6 +18,7 @@ import { useI18n } from "@/lib/i18n";
 import { canCreateMatches, canEditEntity } from "@/lib/permissions";
 import { formatDateDDMMYYYY, formatTimeStable } from "@/lib/utils/date";
 import { FavoriteButton } from "@/components/ui/favorite-button";
+import { TeamAvatar } from "@/components/teams/team-identity";
 
 function getBadgeVariant(status: MatchStatus) {
   if (status === "LIVE") return "live" as const;
@@ -34,21 +35,6 @@ function isHomeWinner(status: MatchStatus, homeScore: number | null, awayScore: 
 function isAwayWinner(status: MatchStatus, homeScore: number | null, awayScore: number | null) {
   if ((status !== "LIVE" && status !== "FINISHED") || homeScore === null || awayScore === null) return false;
   return awayScore > homeScore;
-}
-
-function TeamBadge({ name, profileImageUrl }: { name: string; profileImageUrl?: string | null }) {
-  if (profileImageUrl) {
-    return (
-      <img
-        src={profileImageUrl}
-        alt={name}
-        className="h-4 w-4 rounded-full object-cover"
-        loading="lazy"
-      />
-    );
-  }
-
-  return <span className="inline-flex h-4 w-4 items-center justify-center text-[10px]">🛡️</span>;
 }
 
 function MatchesPageContent() {
@@ -323,7 +309,7 @@ function MatchesPageContent() {
                                       <div className="min-w-[220px] space-y-1">
                                         <div className="flex items-center justify-between gap-3">
                                           <span className={`flex items-center gap-1.5 ${isHomeWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}`}>
-                                            <TeamBadge name={match.homeTeam} profileImageUrl={match.homeTeamProfileImageUrl} />
+                                            <TeamAvatar name={match.homeTeam} profileImageUrl={match.homeTeamProfileImageUrl} size="sm" />
                                             {match.homeTeam}
                                           </span>
                                           <span className={isHomeWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}>
@@ -332,7 +318,7 @@ function MatchesPageContent() {
                                         </div>
                                         <div className="flex items-center justify-between gap-3">
                                           <span className={`flex items-center gap-1.5 ${isAwayWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}`}>
-                                            <TeamBadge name={match.awayTeam} profileImageUrl={match.awayTeamProfileImageUrl} />
+                                            <TeamAvatar name={match.awayTeam} profileImageUrl={match.awayTeamProfileImageUrl} size="sm" />
                                             {match.awayTeam}
                                           </span>
                                           <span className={isAwayWinner(match.status, match.homeScore, match.awayScore) ? "font-semibold" : ""}>

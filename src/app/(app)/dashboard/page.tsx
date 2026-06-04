@@ -9,6 +9,7 @@ import { StatCard } from "@/components/ui/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DonutChart } from "@/components/charts/donut-chart";
+import { TeamAvatar } from "@/components/teams/team-identity";
 import { useI18n } from "@/lib/i18n";
 import { canManageTournaments } from "@/lib/permissions";
 import { formatDateTimeDDMMYYYY } from "@/lib/utils/date";
@@ -71,7 +72,13 @@ export default function DashboardPage() {
             {matches.slice(0, 4).map((match) => (
               <div key={match.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
                 <div>
-                  <p className="font-medium">{match.homeTeam} vs {match.awayTeam}</p>
+                  <p className="flex items-center gap-2 font-medium">
+                    <TeamAvatar name={match.homeTeam} profileImageUrl={match.homeTeamProfileImageUrl} size="sm" />
+                    <span>{match.homeTeam}</span>
+                    <span>vs</span>
+                    <TeamAvatar name={match.awayTeam} profileImageUrl={match.awayTeamProfileImageUrl} size="sm" />
+                    <span>{match.awayTeam}</span>
+                  </p>
                   <p className="text-xs" style={{ color: "var(--text-secondary)" }}>{formatDateTimeDDMMYYYY(match.scheduledAt)} • {match.venue}</p>
                 </div>
                 <Badge variant={match.status === "LIVE" ? "live" : match.status === "FINISHED" ? "completed" : "upcoming"}>{match.status.toLowerCase()}</Badge>
@@ -95,7 +102,10 @@ export default function DashboardPage() {
             {standings.slice(0, 5).map((row) => (
               <div key={row.team} className="grid grid-cols-[24px_1fr_auto] items-center gap-2 rounded-xl border p-3 text-sm" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
                 <span style={{ color: "var(--text-secondary)" }}>{row.position}</span>
-                <span>{row.team}</span>
+                <span className="flex items-center gap-2">
+                  <TeamAvatar name={row.team} profileImageUrl={row.profileImageUrl} size="sm" />
+                  <span>{row.team}</span>
+                </span>
                 <span className="font-semibold" style={{ color: "var(--primary)" }}>{row.points} pts</span>
               </div>
             ))}

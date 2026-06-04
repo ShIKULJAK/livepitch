@@ -13,13 +13,7 @@ import { useI18n } from "@/lib/i18n";
 import { canCreateTeams, canEditEntity } from "@/lib/permissions";
 import { FavoriteTargetType } from "@prisma/client";
 import { FavoriteButton } from "@/components/ui/favorite-button";
-
-function TeamBadge({ name, profileImageUrl }: { name: string; profileImageUrl?: string | null }) {
-  if (profileImageUrl) {
-    return <img src={profileImageUrl} alt={name} className="h-4 w-4 rounded-full object-cover" loading="lazy" />;
-  }
-  return <span className="inline-flex h-4 w-4 items-center justify-center text-[10px]">🛡️</span>;
-}
+import { TeamAvatar } from "@/components/teams/team-identity";
 
 export default function TeamsPage() {
   const { t } = useI18n();
@@ -67,7 +61,7 @@ export default function TeamsPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <FavoriteButton targetType={FavoriteTargetType.TEAM} targetId={team.id} />
-                      <TeamBadge name={team.name} profileImageUrl={team.profileImageUrl} />
+                      <TeamAvatar name={team.name} profileImageUrl={team.profileImageUrl} size="sm" />
                       <span className="font-medium">{team.name}</span>
                     </div>
                   </td>

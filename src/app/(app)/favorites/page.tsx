@@ -5,13 +5,7 @@ import { useFavorites } from "@/hooks/use-competitions";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
-
-function TeamBadge({ name, profileImageUrl }: { name: string; profileImageUrl?: string | null }) {
-  if (profileImageUrl) {
-    return <img src={profileImageUrl} alt={name} className="h-4 w-4 rounded-full object-cover" loading="lazy" />;
-  }
-  return <span className="inline-flex h-4 w-4 items-center justify-center text-[10px]">🛡️</span>;
-}
+import { TeamAvatar, TeamIdentity } from "@/components/teams/team-identity";
 
 export default function FavoritesPage() {
   const favoritesQuery = useFavorites();
@@ -43,8 +37,7 @@ export default function FavoritesPage() {
                 favoritesQuery.data.teams.map((team) => (
                   <Link key={team.id} href={`/teams/${team.id}`} className="block rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
                     <span className="flex items-center gap-2">
-                      <TeamBadge name={team.name} profileImageUrl={team.profileImageUrl} />
-                      <span>{team.name}</span>
+                      <TeamIdentity name={team.name} profileImageUrl={team.profileImageUrl} size="sm" />
                     </span>
                   </Link>
                 ))
@@ -60,7 +53,14 @@ export default function FavoritesPage() {
               {favoritesQuery.data.matches.length ? (
                 favoritesQuery.data.matches.map((match) => (
                   <Link key={match.id} href={`/matches/${match.id}`} className="block rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
-                    {match.homeTeam.name} vs {match.awayTeam.name} - {match.competition.name}
+                    <span className="flex items-center gap-2">
+                      <TeamAvatar name={match.homeTeam.name} profileImageUrl={match.homeTeam.profileImageUrl} size="sm" />
+                      <span>{match.homeTeam.name}</span>
+                      <span>vs</span>
+                      <TeamAvatar name={match.awayTeam.name} profileImageUrl={match.awayTeam.profileImageUrl} size="sm" />
+                      <span>{match.awayTeam.name}</span>
+                      <span>- {match.competition.name}</span>
+                    </span>
                   </Link>
                 ))
               ) : (

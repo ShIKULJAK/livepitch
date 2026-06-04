@@ -13,6 +13,7 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Select } from "@/components/ui/select";
+import { TeamAvatar } from "@/components/teams/team-identity";
 import { formatDateTimeStable } from "@/lib/utils/date";
 
 type DrawTeam = { name: string; profileImageUrl?: string | null };
@@ -45,14 +46,6 @@ function resolveGenerationProfile(generationLabel: string) {
   const preset = getGenerationPreset(generationLabel);
   if (!preset) return null;
   return preset;
-}
-
-function TeamMark({ name, imageUrl }: { name: string; imageUrl?: string | null }) {
-  if (imageUrl) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={imageUrl} alt={name} className="h-4 w-4 rounded-full object-cover" />;
-  }
-  return <span>🛡️</span>;
 }
 
 export default function CompetitionDrawPage() {
@@ -600,8 +593,8 @@ export default function CompetitionDrawPage() {
     away: { name: string; imageUrl?: string | null }
   ) => (
     <div key={id} className="mx-auto w-full min-w-[118px] max-w-[142px] rounded-lg border px-1.5 py-1.5 text-[10px] shadow-sm" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
-      <p className="flex items-center gap-1 truncate"><TeamMark name={home.name} imageUrl={home.imageUrl} /><span>{home.name}</span></p>
-      <p className="flex items-center gap-1 truncate"><TeamMark name={away.name} imageUrl={away.imageUrl} /><span>{away.name}</span></p>
+      <p className="flex items-center gap-1 truncate"><TeamAvatar name={home.name} profileImageUrl={home.imageUrl} size="sm" /><span>{home.name}</span></p>
+      <p className="flex items-center gap-1 truncate"><TeamAvatar name={away.name} profileImageUrl={away.imageUrl} size="sm" /><span>{away.name}</span></p>
     </div>
   );
 
@@ -615,7 +608,7 @@ export default function CompetitionDrawPage() {
         {group.teams.map((entry, index) => (
           <div key={`${group.id}-${entry.team.name}`} className="grid grid-cols-[24px_1fr_20px_20px] gap-1">
             <span>{index + 1}</span>
-            <span className="flex items-center gap-1 truncate"><TeamMark name={entry.team.name} imageUrl={entry.team.profileImageUrl} /><span className="truncate">{entry.team.name}</span></span>
+            <span className="flex items-center gap-1 truncate"><TeamAvatar name={entry.team.name} profileImageUrl={entry.team.profileImageUrl} size="sm" /><span className="truncate">{entry.team.name}</span></span>
             <span>0</span><span>0</span>
           </div>
         ))}
@@ -632,8 +625,8 @@ export default function CompetitionDrawPage() {
           return (
             <div key={match.id} className="rounded-md border p-2 text-xs" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface)" }}>
               <p className="mb-1 text-[11px]" style={{ color: "var(--text-secondary)" }}>Utakmica {index + 1}</p>
-              <p className="flex items-center gap-1 truncate"><TeamMark name={labels.home.name} imageUrl={labels.home.imageUrl} />{labels.home.name}</p>
-              <p className="flex items-center gap-1 truncate"><TeamMark name={labels.away.name} imageUrl={labels.away.imageUrl} />{labels.away.name}</p>
+              <p className="flex items-center gap-1 truncate"><TeamAvatar name={labels.home.name} profileImageUrl={labels.home.imageUrl} size="sm" />{labels.home.name}</p>
+              <p className="flex items-center gap-1 truncate"><TeamAvatar name={labels.away.name} profileImageUrl={labels.away.imageUrl} size="sm" />{labels.away.name}</p>
             </div>
           );
         })}
@@ -744,7 +737,7 @@ export default function CompetitionDrawPage() {
         <div className="flex flex-wrap gap-2">
           {competition.participants.map((team) => (
             <span key={team.id} className="rounded-full border px-3 py-1 text-xs" style={{ borderColor: "var(--border)" }}>
-              <span className="mr-1 inline-flex align-middle"><TeamMark name={team.name} imageUrl={team.profileImageUrl} /></span>{team.name}
+              <span className="mr-1 inline-flex align-middle"><TeamAvatar name={team.name} profileImageUrl={team.profileImageUrl} size="sm" /></span>{team.name}
             </span>
           ))}
         </div>
@@ -1090,7 +1083,7 @@ export default function CompetitionDrawPage() {
                       <p className="mb-2 font-semibold">Group {group.name}</p>
                       <div className="space-y-1 text-sm">
                         {group.teams.map((entry) => (
-                          <p key={entry.id} className="flex items-center gap-1">{entry.position ? `${entry.position}. ` : ""}<TeamMark name={entry.team.name} imageUrl={entry.team.profileImageUrl} /><span>{entry.team.name}</span></p>
+                          <p key={entry.id} className="flex items-center gap-1">{entry.position ? `${entry.position}. ` : ""}<TeamAvatar name={entry.team.name} profileImageUrl={entry.team.profileImageUrl} size="sm" /><span>{entry.team.name}</span></p>
                         ))}
                       </div>
                     </div>
@@ -1102,8 +1095,8 @@ export default function CompetitionDrawPage() {
                     {(draw.groupMatches ?? []).map((match, index) => (
                       <div key={match.id} className="rounded-lg border p-2" style={{ borderColor: "var(--border)" }}>
                         <p style={{ color: "var(--text-secondary)" }}>#{index + 1} · {match.round ?? "Group Stage"}</p>
-                        <p className="flex items-center gap-1 truncate"><TeamMark name={match.homeTeam.name} imageUrl={match.homeTeam.profileImageUrl} />{match.homeTeam.name}</p>
-                        <p className="flex items-center gap-1 truncate"><TeamMark name={match.awayTeam.name} imageUrl={match.awayTeam.profileImageUrl} />{match.awayTeam.name}</p>
+                        <p className="flex items-center gap-1 truncate"><TeamAvatar name={match.homeTeam.name} profileImageUrl={match.homeTeam.profileImageUrl} size="sm" />{match.homeTeam.name}</p>
+                        <p className="flex items-center gap-1 truncate"><TeamAvatar name={match.awayTeam.name} profileImageUrl={match.awayTeam.profileImageUrl} size="sm" />{match.awayTeam.name}</p>
                         <p style={{ color: "var(--text-secondary)" }}>{formatKickoff(match.scheduledAt)}</p>
                         <p style={{ color: "var(--text-secondary)" }}>{formatVenueDisplay(match.venueLabel, match.pitchName)}</p>
                       </div>
@@ -1131,8 +1124,8 @@ export default function CompetitionDrawPage() {
                               return (
                                 <div key={match.id} className="rounded-md border p-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface)" }}>
                                   <p style={{ color: "var(--text-secondary)" }}>Utakmica {idx + 1}</p>
-                                  <p className="flex items-center gap-1 truncate"><TeamMark name={labels.home.name} imageUrl={labels.home.imageUrl} />{labels.home.name}</p>
-                                  <p className="flex items-center gap-1 truncate"><TeamMark name={labels.away.name} imageUrl={labels.away.imageUrl} />{labels.away.name}</p>
+                                  <p className="flex items-center gap-1 truncate"><TeamAvatar name={labels.home.name} profileImageUrl={labels.home.imageUrl} size="sm" />{labels.home.name}</p>
+                                  <p className="flex items-center gap-1 truncate"><TeamAvatar name={labels.away.name} profileImageUrl={labels.away.imageUrl} size="sm" />{labels.away.name}</p>
                                   {match.scheduledAt ? <p style={{ color: "var(--text-secondary)" }}>{formatKickoff(match.scheduledAt)}</p> : null}
                                   <p style={{ color: "var(--text-secondary)" }}>{formatVenueDisplay(match.venueLabel, match.pitchName)}</p>
                                 </div>
@@ -1158,7 +1151,7 @@ export default function CompetitionDrawPage() {
                 <div className="space-y-3 lg:hidden">
                   <details className="rounded-lg border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
                     <summary className="cursor-pointer text-sm font-semibold" style={{ color: "#9BEA3C" }}>Grupna faza ({draw?.groups.length ?? 0} grupa)</summary>
-                    <div className="mt-3 grid gap-2">{draw?.groups.map((group) => <div key={group.id} className="rounded-md border p-2 text-xs" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface)" }}><p className="mb-1 font-semibold" style={{ color: "#9BEA3C" }}>GRUPA {group.name}</p><div className="space-y-1">{group.teams.map((entry, idx) => <p key={entry.id} className="truncate">{idx + 1}. {entry.team.name}</p>)}</div></div>)}</div>
+                    <div className="mt-3 grid gap-2">{draw?.groups.map((group) => <div key={group.id} className="rounded-md border p-2 text-xs" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface)" }}><p className="mb-1 font-semibold" style={{ color: "#9BEA3C" }}>GRUPA {group.name}</p><div className="space-y-1">{group.teams.map((entry, idx) => <p key={entry.id} className="flex items-center gap-1 truncate">{idx + 1}. <TeamAvatar name={entry.team.name} profileImageUrl={entry.team.profileImageUrl} size="sm" /><span className="truncate">{entry.team.name}</span></p>)}</div></div>)}</div>
                   </details>
                   {hasR16 ? renderRoundList("1/8 FINALA", [...r16Left, ...r16Right]) : null}
                   {hasQF ? renderRoundList("1/4 FINALA", [...qfLeft, ...qfRight]) : null}

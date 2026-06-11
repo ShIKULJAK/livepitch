@@ -11,11 +11,11 @@ export function DonutChart({ values, colors }: { values: { name: string; value: 
   );
 
   if (!isClient) {
-    return <div className="h-56 w-full animate-pulse rounded-xl" style={{ backgroundColor: "var(--surface-2)" }} aria-hidden />;
+    return <div className="h-56 min-w-0 w-full animate-pulse rounded-xl" style={{ backgroundColor: "var(--surface-2)" }} aria-hidden />;
   }
 
   return (
-    <div className="h-56 w-full">
+    <div className="h-56 min-w-0 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie data={values} innerRadius={62} outerRadius={90} dataKey="value" paddingAngle={2}>

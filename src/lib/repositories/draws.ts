@@ -24,8 +24,10 @@ type GroupFixtureSeed = {
   awayTeamId: string;
   groupOrder: number;
   seedOrder: number;
+  roundLabel?: string;
 };
 
+type ScheduleInterval = { startAt: number; endAt: number };
 type ScheduleStageScope = "GROUP_STAGE" | "KNOCKOUT" | "ALL";
 type ScheduleDayConfig = {
   dayLabel: string;
@@ -65,6 +67,85 @@ function resolveGenerationProfile(generationLabel: string): GenerationProfile | 
     goalWidthMeters: preset.goalWidthMeters,
     goalHeightMeters: preset.goalHeightMeters,
   };
+}
+
+function adjacentGenerationYears(generationYear: number | null | undefined) {
+  if (!generationYear) return [];
+  return [generationYear - 1, generationYear + 1];
+}
+
+function scheduledMatchIntervals(
+  matches: Array<{ scheduledAt: Date; regularTimeMinutes: number }>,
+  fallbackDurationMinutes: number
+): ScheduleInterval[] {
+  return matches.map((match) => {
+    const startAt = match.scheduledAt.getTime();
+    const durationMinutes =
+      Number.isFinite(match.regularTimeMinutes) && match.regularTimeMinutes > 0
+        ? match.regularTimeMinutes
+        : fallbackDurationMinutes;
+    return { startAt, endAt: startAt + (durationMinutes + 5) * 60 * 1000 };
+  });
+}
+
+function scheduledSlotIntervals(
+  slots: Array<{ scheduledAt: Date | null }>,
+  durationMinutes: number
+): ScheduleInterval[] {
+  return slots.flatMap((slot) => {
+    if (!slot.scheduledAt) return [];
+    const startAt = slot.scheduledAt.getTime();
+    return [{ startAt, endAt: startAt + durationMinutes * 60 * 1000 }];
+  });
+}
+
+function toDateKey(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function addUtcDays(date: Date, days: number) {
+  const next = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function firstSaturdayOnOrAfter(date: Date) {
+  const base = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = base.getUTCDay();
+  const offset = (6 - day + 7) % 7;
+  return addUtcDays(base, offset);
+}
+
+function buildLeagueRoundScheduleDays(input: {
+  baseDate: Date;
+  roundIndex: number;
+  templates: ScheduleDayConfig[];
+  includeWeekdays: boolean;
+}) {
+  const templates = input.templates.length
+    ? input.templates
+    : [{ dayLabel: "Dan 1", startTime: "09:00", endTime: "19:00" }];
+  const weekStart = input.includeWeekdays
+    ? addUtcDays(input.baseDate, input.roundIndex * 7)
+    : addUtcDays(firstSaturdayOnOrAfter(input.baseDate), input.roundIndex * 7);
+  const dates = input.includeWeekdays
+    ? Array.from({ length: 7 }, (_, index) => addUtcDays(weekStart, index))
+    : [weekStart, addUtcDays(weekStart, 1)];
+
+  return dates.flatMap((date, dayIndex) =>
+    templates.map((template) => ({
+      ...template,
+      dayLabel: `Kolo ${input.roundIndex + 1} - ${
+        input.includeWeekdays
+          ? `Dan ${dayIndex + 1}`
+          : dayIndex === 0
+            ? "Subota"
+            : "Nedjelja"
+      }`,
+      dayDate: toDateKey(date),
+      stageScope: "ALL" as const,
+    }))
+  );
 }
 
 function normalizeStageScope(value?: string | null): ScheduleStageScope {
@@ -239,6 +320,42 @@ function createGroupFixtures(groupId: string, groupName: string, teamIds: string
   return fixtures;
 }
 
+function createLeagueFixtures(teams: Participant[]) {
+  const shuffled = shuffle(teams);
+  const participants = shuffled.length % 2 === 0 ? shuffled : [...shuffled, null];
+  const roundsCount = Math.max(0, participants.length - 1);
+  const half = participants.length / 2;
+  const rotation = [...participants];
+  const fixtures: GroupFixtureSeed[] = [];
+
+  for (let roundIndex = 0; roundIndex < roundsCount; roundIndex += 1) {
+    const roundLabel = `Kolo ${roundIndex + 1}`;
+    for (let pairIndex = 0; pairIndex < half; pairIndex += 1) {
+      const first = rotation[pairIndex];
+      const second = rotation[rotation.length - 1 - pairIndex];
+      if (!first || !second) continue;
+      const shouldFlip = (roundIndex + pairIndex) % 2 === 1;
+      const home = shouldFlip ? second : first;
+      const away = shouldFlip ? first : second;
+      fixtures.push({
+        drawGroupId: `league-round-${roundIndex + 1}`,
+        groupName: roundLabel,
+        homeTeamId: home.id,
+        awayTeamId: away.id,
+        groupOrder: roundIndex + 1,
+        seedOrder: pairIndex + 1,
+        roundLabel,
+      });
+    }
+
+    const fixed = rotation[0];
+    const rest = rotation.slice(1);
+    rotation.splice(0, rotation.length, fixed, rest[rest.length - 1], ...rest.slice(0, -1));
+  }
+
+  return fixtures;
+}
+
 function interleaveGroupFixtures(fixtures: GroupFixtureSeed[]) {
   const byGroup = new Map<string, GroupFixtureSeed[]>();
   for (const fixture of fixtures) {
@@ -315,8 +432,8 @@ function buildScheduledFixtures(
   startAt: Date,
   scheduleDays: ScheduleDayConfig[],
   slotDurationMinutes: number,
-  occupiedIntervalsByPitch: Map<string, Array<{ startAt: number; endAt: number }>> = new Map(),
-  options?: { tournamentEndDate?: Date | null; packEarlierDays?: boolean }
+  occupiedIntervalsByPitch: Map<string, ScheduleInterval[]> = new Map(),
+  options?: { tournamentEndDate?: Date | null; packEarlierDays?: boolean; blockedIntervals?: ScheduleInterval[] }
 ) {
   const ordered = interleaveGroupFixtures(fixtures);
   const slotMs = slotDurationMinutes * 60 * 1000;
@@ -392,14 +509,19 @@ function buildScheduledFixtures(
     const intervals = occupiedIntervalsByPitch.get(pitchName) ?? [];
     return intervals.find((interval) => startAt < interval.endAt && endAt > interval.startAt) ?? null;
   };
+  const findBlockedOverlap = (startAt: number, endAt: number) =>
+    options?.blockedIntervals?.find((interval) => startAt < interval.endAt && endAt > interval.startAt) ?? null;
 
   const advancePitch = (state: { pitchName: string; dayIndex: number; nextStartAt: number }) => {
     if (state.dayIndex >= dayStarts.length) return;
     const day = dayStarts[state.dayIndex];
     while (state.nextStartAt + slotMs <= day.endTs) {
-      const overlap = findOverlap(state.pitchName, state.nextStartAt, state.nextStartAt + slotMs);
-      if (!overlap) return;
-      state.nextStartAt = overlap.endAt;
+      const slotStartAt = state.nextStartAt;
+      const slotEndAt = state.nextStartAt + slotMs;
+      const overlap = findOverlap(state.pitchName, slotStartAt, slotEndAt);
+      const blockedOverlap = findBlockedOverlap(slotStartAt, slotEndAt);
+      if (!overlap && !blockedOverlap) return;
+      state.nextStartAt = Math.max(overlap?.endAt ?? slotStartAt, blockedOverlap?.endAt ?? slotStartAt);
     }
     state.dayIndex = dayStarts.length;
   };
@@ -556,8 +678,8 @@ function buildKnockoutScheduleSlotPicker(
   scheduleDays: ScheduleDayConfig[],
   startAt: Date,
   slotDurationMinutes: number,
-  occupiedIntervalsByPitch: Map<string, Array<{ startAt: number; endAt: number }>>,
-  options?: { tournamentEndDate?: Date | null; minStartAt?: Date | null }
+  occupiedIntervalsByPitch: Map<string, ScheduleInterval[]>,
+  options?: { tournamentEndDate?: Date | null; minStartAt?: Date | null; blockedIntervals?: ScheduleInterval[] }
 ) {
   const slotMs = slotDurationMinutes * 60 * 1000;
   const knockoutFloorTs = options?.minStartAt ? options.minStartAt.getTime() : null;
@@ -630,14 +752,19 @@ function buildKnockoutScheduleSlotPicker(
     const intervals = occupiedIntervalsByPitch.get(pitchName) ?? [];
     return intervals.find((interval) => startAtValue < interval.endAt && endAtValue > interval.startAt) ?? null;
   };
+  const findBlockedOverlap = (startAtValue: number, endAtValue: number) =>
+    options?.blockedIntervals?.find((interval) => startAtValue < interval.endAt && endAtValue > interval.startAt) ?? null;
 
   const advancePitch = (state: { pitchName: string; dayIndex: number; nextStartAt: number }) => {
     if (state.dayIndex >= dayStarts.length) return;
     const day = dayStarts[state.dayIndex];
     while (state.nextStartAt + slotMs <= day.endTs) {
-      const overlap = findOverlap(state.pitchName, state.nextStartAt, state.nextStartAt + slotMs);
-      if (!overlap) return;
-      state.nextStartAt = overlap.endAt;
+      const slotStartAt = state.nextStartAt;
+      const slotEndAt = state.nextStartAt + slotMs;
+      const overlap = findOverlap(state.pitchName, slotStartAt, slotEndAt);
+      const blockedOverlap = findBlockedOverlap(slotStartAt, slotEndAt);
+      if (!overlap && !blockedOverlap) return;
+      state.nextStartAt = Math.max(overlap?.endAt ?? slotStartAt, blockedOverlap?.endAt ?? slotStartAt);
     }
     state.dayIndex = dayStarts.length;
   };
@@ -1126,6 +1253,37 @@ export async function resetDraw(
   const competition = await ensureCompetition(organizationId, competitionId);
   if (!competition) return null;
   if (!canEditEntity(actor, competition)) throw new Error("Forbidden");
+
+  if (competition.type === CompetitionType.LEAGUE) {
+    await prisma.match.deleteMany({
+      where: {
+        competitionId,
+        stage: "LEAGUE",
+        ...(generationYear == null ? {} : { generationYear }),
+      },
+    });
+    if (resetScheduleDays) {
+      const defaultDayDate = (competition.startDate ?? new Date()).toISOString().slice(0, 10);
+      await prisma.competition.update({
+        where: { id: competitionId },
+        data: {
+          scheduleDays: [
+            {
+              dayLabel: "Dan 1",
+              dayDate: defaultDayDate,
+              generationLabel: ALL_GENERATIONS_LABEL,
+              stageScope: "ALL",
+              pitchId: null,
+              startTime: "09:00",
+              endTime: "19:00",
+            },
+          ] as Prisma.InputJsonValue,
+        },
+      });
+    }
+    return { ok: true };
+  }
+
   if (competition.type !== CompetitionType.TOURNAMENT) {
     return { ok: true };
   }
@@ -1176,6 +1334,175 @@ export async function resetDraw(
   return { ok: true };
 }
 
+async function generateLeagueSchedule(
+  organizationId: string,
+  actor: { id: string; role: string },
+  competitionId: string,
+  config: DrawConfigInput
+) {
+  const competition = await ensureCompetition(organizationId, competitionId);
+  if (!competition) return null;
+  if (!canEditEntity(actor, competition)) throw new Error("Forbidden");
+  if (competition.type !== CompetitionType.LEAGUE) {
+    throw new Error("League schedule generation is available only for league competitions.");
+  }
+
+  const scopedTeamGenerations = await filterEligibleTeamGenerations(competition.id, competition.teamGenerations);
+  const availableGenerationYears = Array.from(new Set(scopedTeamGenerations.map((item) => item.generationYear))).sort((a, b) => b - a);
+  const generationYear = config.generationYear ?? availableGenerationYears[0] ?? null;
+  const participants = generationYear
+    ? scopedTeamGenerations
+        .filter((item) => item.generationYear === generationYear)
+        .map((item) => ({ id: item.team.id, name: item.team.name }))
+        .filter((item, index, array) => array.findIndex((entry) => entry.id === item.id) === index)
+    : competition.teams
+        .map((entry) => ({ id: entry.team.id, name: entry.team.name }))
+        .filter((item, index, array) => array.findIndex((entry) => entry.id === item.id) === index);
+
+  if (participants.length < 2) {
+    throw new Error("Za kreiranje ligaškog rasporeda potrebne su najmanje dvije ekipe.");
+  }
+
+  const existingMatches = await prisma.match.count({
+    where: {
+      competitionId,
+      stage: "LEAGUE",
+      ...(generationYear ? { generationYear } : { generationYear: null }),
+    },
+  });
+  if (existingMatches > 0) {
+    throw new Error("Ligaški raspored već postoji za ovu generaciju/sezonu. Obriši postojeće utakmice prije ponovnog generisanja.");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const generationLabel = generationYear ? `Generacija ${generationYear}` : ALL_GENERATIONS_LABEL;
+    const placeholderBaseDate = competition.startDate ?? new Date();
+    const rawScheduleDays =
+      (competition.scheduleDays as unknown as Array<{ dayLabel: string; dayDate?: string; generationLabel?: string; pitchId?: string | null; startTime: string; endTime: string; stageScope?: ScheduleStageScope }> | null) ?? [];
+    const scheduleDays = (
+      rawScheduleDays.length
+        ? rawScheduleDays
+        : [
+            {
+              dayLabel: "Dan 1",
+              dayDate: (competition.startDate ?? new Date()).toISOString().slice(0, 10),
+              pitchId: null,
+              startTime: "09:00",
+              endTime: "19:00",
+            },
+          ]
+    ).filter((day) => day.dayLabel && day.startTime && day.endTime);
+    const leagueScheduleDays = scheduleDays.filter(
+      (day) => !generationYear || day.generationLabel === generationLabel || day.generationLabel === ALL_GENERATIONS_LABEL || !day.generationLabel
+    );
+    if (!leagueScheduleDays.length) {
+      throw new Error(`Nema definisanih termina za ${generationLabel}.`);
+    }
+
+    const slotDurationMinutes = competition.matchDurationMinutes;
+    const activePitchLabels = await tx.pitch.findMany({
+      where: { organizationId, isActive: true },
+      include: { venue: { select: { name: true } } },
+      orderBy: { createdAt: "asc" },
+    });
+    const fallbackPitchNames = competition.pitchNames?.length
+      ? competition.pitchNames
+      : activePitchLabels.length
+        ? activePitchLabels.map((pitch) => (pitch.venue?.name ? `${pitch.venue.name} - ${pitch.name}` : pitch.name))
+        : ["Teren 1"];
+    const adjacentYears = adjacentGenerationYears(generationYear);
+    const adjacentMatches = adjacentYears.length
+      ? await tx.match.findMany({
+          where: {
+            competitionId,
+            generationYear: { in: adjacentYears },
+            status: { not: "CANCELED" },
+          },
+          select: {
+            scheduledAt: true,
+            regularTimeMinutes: true,
+          },
+        })
+      : [];
+    const blockedIntervals = scheduledMatchIntervals(adjacentMatches, competition.matchDurationMinutes);
+    const fixtures = createLeagueFixtures(participants);
+    const scheduledFixtures: Array<{ fixture: GroupFixtureSeed; pitchName: string; scheduledAt: Date }> = [];
+    const occupiedIntervalsByPitch = new Map<string, ScheduleInterval[]>();
+    const fixturesByRound = new Map<number, GroupFixtureSeed[]>();
+    for (const fixture of fixtures) {
+      const roundFixtures = fixturesByRound.get(fixture.groupOrder) ?? [];
+      roundFixtures.push(fixture);
+      fixturesByRound.set(fixture.groupOrder, roundFixtures);
+    }
+    const sortedRounds = Array.from(fixturesByRound.entries()).sort(([a], [b]) => a - b);
+    for (const [roundOrder, roundFixtures] of sortedRounds) {
+      const roundScheduleDays = buildLeagueRoundScheduleDays({
+        baseDate: placeholderBaseDate,
+        roundIndex: roundOrder - 1,
+        templates: leagueScheduleDays.map((day) => ({ ...day, stageScope: "ALL" as const })),
+        includeWeekdays: Boolean(config.includeWeekdays),
+      });
+      const roundEndDate = config.includeWeekdays
+        ? null
+        : new Date(`${roundScheduleDays[roundScheduleDays.length - 1]?.dayDate ?? toDateKey(placeholderBaseDate)}T23:59:59.999Z`);
+      const roundResult = buildScheduledFixtures(
+        roundFixtures,
+        fallbackPitchNames,
+        placeholderBaseDate,
+        roundScheduleDays,
+        slotDurationMinutes,
+        occupiedIntervalsByPitch,
+        { tournamentEndDate: roundEndDate, packEarlierDays: true, blockedIntervals }
+      );
+      scheduledFixtures.push(...roundResult.scheduled);
+    }
+
+    const teams = await tx.team.findMany({
+      where: { id: { in: participants.map((team) => team.id) }, organizationId },
+      include: { homeVenue: { include: { pitches: { where: { isActive: true }, orderBy: { createdAt: "asc" } } } } },
+    });
+    const teamById = new Map(teams.map((team) => [team.id, team]));
+
+    for (const scheduledFixture of scheduledFixtures) {
+      const fixture = scheduledFixture.fixture;
+      const homeTeam = teamById.get(fixture.homeTeamId);
+      const homeVenue = homeTeam?.homeVenue ?? null;
+      const scheduledPitch = scheduledFixture.pitchName ?? fallbackPitchNames[0] ?? homeVenue?.pitches[0]?.name ?? "Teren 1";
+      const venueLabel = scheduledPitch.includes(" - ")
+        ? scheduledPitch
+        : homeVenue?.name
+          ? `${homeVenue.name} - ${scheduledPitch}`
+          : (competition.location ?? scheduledPitch);
+
+      await tx.match.create({
+        data: {
+          competitionId: competition.id,
+          seasonId: competition.seasonId ?? null,
+          stage: "LEAGUE",
+          round: fixture.roundLabel ?? `Kolo ${fixture.groupOrder}`,
+          homeTeamId: fixture.homeTeamId,
+          awayTeamId: fixture.awayTeamId,
+          venueId: homeVenue?.id ?? competition.venueId ?? null,
+          venueLabel,
+          pitchName: scheduledPitch,
+          status: "SCHEDULED",
+          scheduledAt: scheduledFixture.scheduledAt,
+          regularTimeMinutes: competition.matchDurationMinutes,
+          createdById: actor.id,
+          generationYear,
+        },
+      });
+    }
+
+    return {
+      competitionId: competition.id,
+      generationYear,
+      matchesCreated: scheduledFixtures.length,
+      roundsCreated: Array.from(new Set(fixtures.map((fixture) => fixture.groupOrder))).length,
+    };
+  });
+}
+
 export async function generateDraw(
   organizationId: string,
   actor: { id: string; role: string },
@@ -1185,6 +1512,9 @@ export async function generateDraw(
   const competition = await ensureCompetition(organizationId, competitionId);
   if (!competition) return null;
   if (!canEditEntity(actor, competition)) throw new Error("Forbidden");
+  if (competition.type === CompetitionType.LEAGUE) {
+    return generateLeagueSchedule(organizationId, actor, competitionId, config);
+  }
   if (competition.type !== CompetitionType.TOURNAMENT) {
     throw new Error("Draw generation is available only for tournament competitions.");
   }
@@ -1414,7 +1744,37 @@ export async function generateDraw(
         scheduledAt: true,
       },
     });
-    const occupiedIntervalsByPitch = new Map<string, Array<{ startAt: number; endAt: number }>>();
+    const adjacentYears = adjacentGenerationYears(generationYear);
+    const adjacentMatches = await tx.match.findMany({
+      where: {
+        competitionId,
+        generationYear: { in: adjacentYears },
+        status: { not: "CANCELED" },
+      },
+      select: {
+        scheduledAt: true,
+        regularTimeMinutes: true,
+      },
+    });
+    const adjacentKnockoutSlots = await tx.drawKnockoutMatch.findMany({
+      where: {
+        scheduledAt: { not: null },
+        round: {
+          draw: {
+            competitionId,
+            generationYear: { in: adjacentYears },
+          },
+        },
+      },
+      select: {
+        scheduledAt: true,
+      },
+    });
+    const blockedIntervals = [
+      ...scheduledMatchIntervals(adjacentMatches, generationMatchDurationMinutes),
+      ...scheduledSlotIntervals(adjacentKnockoutSlots, slotDurationMinutes),
+    ];
+    const occupiedIntervalsByPitch = new Map<string, ScheduleInterval[]>();
     for (const match of existingMatches) {
       if (!match.pitchName) continue;
       const startAt = match.scheduledAt.getTime();
@@ -1494,7 +1854,7 @@ export async function generateDraw(
         groupScheduleWithPitch,
         slotDurationMinutes,
         occupiedIntervalsByPitch,
-        { tournamentEndDate: competition.endDate ?? null, packEarlierDays: true }
+        { tournamentEndDate: competition.endDate ?? null, packEarlierDays: true, blockedIntervals }
       );
       autoAddedScheduleDays.push(
         ...scheduledFixtureResult.addedDays.map((day) => ({
@@ -1667,7 +2027,7 @@ export async function generateDraw(
         placeholderBaseDate,
         slotDurationMinutes,
         occupiedIntervalsByPitch,
-        { tournamentEndDate: competition.endDate ?? null, minStartAt: groupPhaseEndAt }
+        { tournamentEndDate: competition.endDate ?? null, minStartAt: groupPhaseEndAt, blockedIntervals }
       );
       const appendedKnockoutDayKeys = new Set<string>();
       for (const match of round.matches) {

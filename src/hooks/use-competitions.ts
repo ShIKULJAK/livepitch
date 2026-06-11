@@ -146,6 +146,30 @@ const dashboardResponse = z.object({
   }),
 });
 
+const statisticsResponse = z.object({
+  data: z.object({
+    totalGoals: z.number(),
+    goalsPerMatch: z.number(),
+    goalEvents: z.number(),
+    cleanSheets: z.number(),
+    yellowCards: z.number(),
+    redCards: z.number(),
+    goalsOverview: z.array(
+      z.object({
+        label: z.string(),
+        home: z.number(),
+        away: z.number(),
+      })
+    ),
+    resultsBreakdown: z.array(
+      z.object({
+        name: z.string(),
+        value: z.number(),
+      })
+    ),
+  }),
+});
+
 const teamsResponse = z.object({
   data: z.array(
     z.object({
@@ -779,7 +803,13 @@ export function useCreateCompetition() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["competitions"] });
+      queryClient.invalidateQueries({ queryKey: ["competition-seasons"] });
+      queryClient.invalidateQueries({ queryKey: ["standings"] });
+      queryClient.invalidateQueries({ queryKey: ["matches"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-snapshot"] });
+      queryClient.invalidateQueries({ queryKey: ["draw-competitions"] });
+      queryClient.invalidateQueries({ queryKey: ["competition-draw"] });
+      queryClient.invalidateQueries({ queryKey: ["statistics-snapshot"] });
     },
   });
 }
@@ -845,6 +875,18 @@ export function useDashboardSnapshot() {
       if (!response.ok) throw new Error("Failed to load dashboard snapshot");
       const json = await response.json();
       return dashboardResponse.parse(json).data;
+    },
+  });
+}
+
+export function useStatisticsSnapshot() {
+  return useQuery({
+    queryKey: ["statistics-snapshot"],
+    queryFn: async () => {
+      const response = await fetch("/api/statistics");
+      if (!response.ok) throw new Error("Failed to load statistics");
+      const json = await response.json();
+      return statisticsResponse.parse(json).data;
     },
   });
 }
@@ -1170,6 +1212,7 @@ type DrawConfigPayload = {
   roundOf16Enabled: boolean;
   quarterfinalsEnabled: boolean;
   thirdPlaceMatchEnabled: boolean;
+  includeWeekdays?: boolean;
 };
 
 export function useGenerateDraw(competitionId: string) {

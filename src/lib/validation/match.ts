@@ -14,7 +14,7 @@ export const matchInputSchema = z.object({
   homeScore: z.number().int().min(0).optional().nullable(),
   awayScore: z.number().int().min(0).optional().nullable(),
   liveMinute: z.number().int().min(0).optional().nullable(),
-  regularTimeMinutes: z.number().int().min(90).max(150).optional(),
+  regularTimeMinutes: z.number().int().min(1).max(300).optional(),
 });
 
 export const matchUpdateSchema = matchInputSchema.partial();

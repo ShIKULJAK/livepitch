@@ -17,6 +17,14 @@ function toIsoDate(date: string, time: string) {
   return new Date(`${date}T${time}:00`).toISOString();
 }
 
+function minutesBetweenTimes(beginTime: string, endTime: string) {
+  const [beginHours, beginMinutes] = beginTime.split(":").map(Number);
+  const [endHours, endMinutes] = endTime.split(":").map(Number);
+  const beginTotal = beginHours * 60 + beginMinutes;
+  const endTotal = endHours * 60 + endMinutes;
+  return endTotal - beginTotal;
+}
+
 const FRIENDLY_COMPETITION_OPTION = "__friendly_game__";
 
 export default function CreateMatchPage() {
@@ -34,10 +42,12 @@ export default function CreateMatchPage() {
   const [venueId, setVenueId] = useState("");
   const [round, setRound] = useState("");
   const [date, setDate] = useState("");
-  const [time, setTime] = useState("18:00");
+  const [beginTime, setBeginTime] = useState("18:00");
+  const [endTime, setEndTime] = useState("19:30");
   const [stadiumName, setStadiumName] = useState("");
   const [pitchName, setPitchName] = useState("Teren 1");
   const [status, setStatus] = useState<MatchStatus>(MatchStatus.SCHEDULED);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const teams = useMemo(() => {
     if (competitionId === FRIENDLY_COMPETITION_OPTION) return teamsQuery.data ?? [];
@@ -53,7 +63,13 @@ export default function CreateMatchPage() {
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setFormError(null);
     const effectiveStadiumName = stadiumName || selectedCompetition?.stadiumName || "";
+    const regularTimeMinutes = minutesBetweenTimes(beginTime, endTime);
+    if (regularTimeMinutes <= 0) {
+      setFormError("Time (end) mora biti poslije Time (begin).");
+      return;
+    }
     await createMatch.mutateAsync({
       competitionId,
       homeTeamId,
@@ -62,11 +78,12 @@ export default function CreateMatchPage() {
       venueLabel: effectiveStadiumName ? `${effectiveStadiumName} - ${pitchName}` : null,
       pitchName: pitchName || null,
       round: round || null,
-      scheduledAt: toIsoDate(date, time),
+      scheduledAt: toIsoDate(date, beginTime),
       status,
       homeScore: null,
       awayScore: null,
       liveMinute: null,
+      regularTimeMinutes,
     });
     router.push("/matches");
   }
@@ -123,8 +140,11 @@ export default function CreateMatchPage() {
           <FormField label="Date" tooltip="Match date." required>
             <Input type="date" value={date} onChange={(event) => setDate(event.currentTarget.value)} required />
           </FormField>
-          <FormField label="Kickoff Time" tooltip="Local kickoff time." required>
-            <Input type="time" value={time} onChange={(event) => setTime(event.currentTarget.value)} required />
+          <FormField label="Time (begin)" tooltip="Local match start time." required>
+            <Input type="time" value={beginTime} onChange={(event) => setBeginTime(event.currentTarget.value)} required />
+          </FormField>
+          <FormField label="Time (end)" tooltip="Local match end time." required>
+            <Input type="time" value={endTime} onChange={(event) => setEndTime(event.currentTarget.value)} required />
           </FormField>
           <FormField label="Stadium" tooltip="Main stadium for this match venue label.">
             <Input
@@ -160,9 +180,9 @@ export default function CreateMatchPage() {
               <option value={MatchStatus.POSTPONED}>Postponed</option>
             </Select>
           </FormField>
-          {createMatch.isError ? (
+          {formError || createMatch.isError ? (
             <p className="text-sm md:col-span-2" style={{ color: "var(--danger)" }}>
-              {(createMatch.error as Error).message}
+              {formError ?? (createMatch.error as Error).message}
             </p>
           ) : null}
           <div className="flex gap-2 md:col-span-2 md:justify-end">

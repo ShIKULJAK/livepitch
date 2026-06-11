@@ -8,6 +8,7 @@ export const drawConfigSchema = z
     roundOf16Enabled: z.boolean().default(false),
     quarterfinalsEnabled: z.boolean().default(true),
     thirdPlaceMatchEnabled: z.boolean().default(false),
+    includeWeekdays: z.boolean().default(false),
   })
   .superRefine((value, ctx) => {
     if (value.groupStageEnabled && value.groupsCount < 1) {

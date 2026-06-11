@@ -593,7 +593,7 @@ export async function createMatch(organizationId: string, actorId: string, input
       homeScore: input.homeScore ?? null,
       awayScore: input.awayScore ?? null,
       liveMinute: input.liveMinute ?? null,
-      regularTimeMinutes: competition.matchDurationMinutes,
+      regularTimeMinutes: input.regularTimeMinutes ?? competition.matchDurationMinutes,
       createdById: actorId,
     },
   });

@@ -15,15 +15,36 @@ import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Select } from "@/components/ui/select";
 
 function toDateInput(value: string) {
-  return new Date(value).toISOString().slice(0, 10);
+  const date = new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function toTimeInput(value: string) {
-  return new Date(value).toISOString().slice(11, 16);
+  const date = new Date(value);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
 }
 
 function toIsoDate(date: string, time: string) {
   return new Date(`${date}T${time}:00`).toISOString();
+}
+
+function minutesBetweenTimes(beginTime: string, endTime: string) {
+  const [beginHours, beginMinutes] = beginTime.split(":").map(Number);
+  const [endHours, endMinutes] = endTime.split(":").map(Number);
+  return endHours * 60 + endMinutes - (beginHours * 60 + beginMinutes);
+}
+
+function addMinutesToTime(value: string, minutes: number) {
+  const date = new Date(value);
+  date.setMinutes(date.getMinutes() + minutes);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const nextMinutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${nextMinutes}`;
 }
 
 export default function EditMatchPage() {
@@ -36,6 +57,7 @@ export default function EditMatchPage() {
   const teamsQuery = useTeams();
   const venuesQuery = useVenues();
   const updateMatch = useUpdateMatch(params.id);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const [draft, setDraft] = useState<{
     competitionId?: string;
@@ -45,7 +67,8 @@ export default function EditMatchPage() {
     venueLabel?: string;
     pitchName?: string;
     date?: string;
-    time?: string;
+    beginTime?: string;
+    endTime?: string;
     status?: MatchStatus;
   }>({});
 
@@ -90,10 +113,17 @@ export default function EditMatchPage() {
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setFormError(null);
     if (!match) return;
 
     const date = draft.date ?? toDateInput(match.scheduledAt);
-    const time = draft.time ?? toTimeInput(match.scheduledAt);
+    const beginTime = draft.beginTime ?? toTimeInput(match.scheduledAt);
+    const endTime = draft.endTime ?? addMinutesToTime(match.scheduledAt, match.regularTimeMinutes);
+    const regularTimeMinutes = minutesBetweenTimes(beginTime, endTime);
+    if (regularTimeMinutes <= 0) {
+      setFormError("Time (end) mora biti poslije Time (begin).");
+      return;
+    }
     const effectivePitch = draft.pitchName ?? match.pitchName ?? availablePitches[0];
     const effectiveStadium = draft.venueLabel ?? match.venueLabel ?? selectedCompetition?.stadiumName ?? "";
 
@@ -105,7 +135,8 @@ export default function EditMatchPage() {
       venueLabel: effectiveStadium ? `${effectiveStadium} - ${effectivePitch}` : null,
       pitchName: effectivePitch,
       round: match.round ?? null,
-      scheduledAt: toIsoDate(date, time),
+      scheduledAt: toIsoDate(date, beginTime),
+      regularTimeMinutes,
       status: draft.status ?? match.status,
     });
     router.push("/matches");
@@ -196,13 +227,24 @@ export default function EditMatchPage() {
               required
             />
           </FormField>
-          <FormField label="Kickoff Time" tooltip="Local kickoff time." required>
+          <FormField label="Time (begin)" tooltip="Local match start time." required>
             <Input
               type="time"
-              value={draft.time ?? toTimeInput(match.scheduledAt)}
+              value={draft.beginTime ?? toTimeInput(match.scheduledAt)}
               onChange={(event) => {
                 const value = event.target.value;
-                setDraft((current) => ({ ...current, time: value }));
+                setDraft((current) => ({ ...current, beginTime: value }));
+              }}
+              required
+            />
+          </FormField>
+          <FormField label="Time (end)" tooltip="Local match end time." required>
+            <Input
+              type="time"
+              value={draft.endTime ?? addMinutesToTime(match.scheduledAt, match.regularTimeMinutes)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setDraft((current) => ({ ...current, endTime: value }));
               }}
               required
             />
@@ -274,9 +316,9 @@ export default function EditMatchPage() {
               <option value={MatchStatus.CANCELED}>Canceled</option>
             </Select>
           </FormField>
-          {updateMatch.isError ? (
+          {formError || updateMatch.isError ? (
             <p className="text-sm md:col-span-2" style={{ color: "var(--danger)" }}>
-              {(updateMatch.error as Error).message}
+              {formError ?? (updateMatch.error as Error).message}
             </p>
           ) : null}
           <div className="flex gap-2 md:col-span-2 md:justify-end">

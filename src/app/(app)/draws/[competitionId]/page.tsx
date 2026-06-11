@@ -83,6 +83,7 @@ export default function CompetitionDrawPage() {
   const [generateErrorVisible, setGenerateErrorVisible] = useState(false);
   const [swapSuccessVisible, setSwapSuccessVisible] = useState(false);
   const [hideDiagnosticsAfterReset, setHideDiagnosticsAfterReset] = useState(false);
+  const [leagueIncludeWeekdays, setLeagueIncludeWeekdays] = useState(false);
   const generationYears = drawQuery.data?.competition.availableGenerationYears ?? [];
   const activeGeneration = drawQuery.data?.competition.selectedGenerationYear ?? generationYears[0] ?? null;
   const scheduleGenerationOptions = [ALL_GENERATIONS_LABEL, ...GENERATION_LABELS];
@@ -268,8 +269,27 @@ export default function CompetitionDrawPage() {
       generationLabel: day.generationLabel || ALL_GENERATIONS_LABEL,
       stageScope: day.stageScope ?? "ALL",
     }));
-    setScheduleDaysDraft(mapped);
-    setHideDiagnosticsAfterReset(false);
+    setScheduleDaysDraft((current) => {
+      if (
+        current.length === mapped.length &&
+        current.every((item, index) => {
+          const next = mapped[index];
+          return (
+            item.dayLabel === next.dayLabel &&
+            item.dayDate === next.dayDate &&
+            item.generationLabel === next.generationLabel &&
+            item.stageScope === next.stageScope &&
+            item.pitchId === next.pitchId &&
+            item.startTime === next.startTime &&
+            item.endTime === next.endTime
+          );
+        })
+      ) {
+        return current;
+      }
+      return mapped;
+    });
+    setHideDiagnosticsAfterReset((current) => (current ? false : current));
   }, [competitionDetailsQuery.data?.scheduleDays, defaultTournamentDay]);
   useEffect(() => {
     if (!scheduleSaved) return;
@@ -329,15 +349,20 @@ export default function CompetitionDrawPage() {
     quarterfinalsEnabled: draftConfig.quarterfinalsEnabled ?? draw?.quarterfinalsEnabled ?? true,
     thirdPlaceMatchEnabled: draftConfig.thirdPlaceMatchEnabled ?? draw?.thirdPlaceMatchEnabled ?? false,
   };
+  const generateConfig = {
+    ...currentConfig,
+    includeWeekdays: !isTournament && leagueIncludeWeekdays,
+  };
 
   async function onGenerate() {
     setGenerateError(null);
     setSwapSuccess(null);
     setScheduleSaved(null);
     try {
-      await generateDraw.mutateAsync({ ...currentConfig });
+      await generateDraw.mutateAsync({ ...generateConfig });
       setScheduleDaysDraft([]);
       await competitionDetailsQuery.refetch();
+      if (!isTournament) setSwapSuccess("Kreiran je raspored lige.");
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Greška pri kreiranju izvlačenja.");
     }
@@ -352,9 +377,10 @@ export default function CompetitionDrawPage() {
       return;
     }
     try {
-      await generateDraw.mutateAsync({ ...currentConfig, generationYear: selectedGenerationYear });
+      await generateDraw.mutateAsync({ ...generateConfig, generationYear: selectedGenerationYear });
       setScheduleDaysDraft([]);
       await competitionDetailsQuery.refetch();
+      if (!isTournament) setSwapSuccess(`Kreiran je raspored lige za generaciju ${selectedGenerationYear}.`);
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Greška pri kreiranju izvlačenja.");
     }
@@ -372,7 +398,11 @@ export default function CompetitionDrawPage() {
       await resetDraw.mutateAsync({ generationYear: selectedGenerationYear });
       setScheduleDaysDraft([]);
       await Promise.all([drawQuery.refetch(), competitionDetailsQuery.refetch()]);
-      setSwapSuccess(`Resetovan žrijeb za generaciju ${selectedGenerationYear}.`);
+      setSwapSuccess(
+        isTournament
+          ? `Resetovan žrijeb za generaciju ${selectedGenerationYear}.`
+          : `Resetovan ligaški raspored za generaciju ${selectedGenerationYear}.`
+      );
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Greška pri resetu izvlačenja.");
     }
@@ -387,7 +417,7 @@ export default function CompetitionDrawPage() {
       setScheduleDaysDraft([]);
       setSelectedGenerationYear(null);
       await Promise.all([drawQuery.refetch(), competitionDetailsQuery.refetch()]);
-      setSwapSuccess("Resetovan kompletan žrijeb.");
+      setSwapSuccess(isTournament ? "Resetovan kompletan žrijeb." : "Resetovan kompletan ligaški raspored.");
     } catch (error) {
       setHideDiagnosticsAfterReset(false);
       setGenerateError(error instanceof Error ? error.message : "Greška pri resetu izvlačenja.");
@@ -404,7 +434,11 @@ export default function CompetitionDrawPage() {
       setScheduleDaysDraft([]);
       setSelectedGenerationYear(null);
       await Promise.all([drawQuery.refetch(), competitionDetailsQuery.refetch()]);
-      setSwapSuccess("Resetovan kompletan žrijeb i dani/satnica.");
+      setSwapSuccess(
+        isTournament
+          ? "Resetovan kompletan žrijeb i dani/satnica."
+          : "Resetovan kompletan ligaški raspored i dani/satnica."
+      );
     } catch (error) {
       setHideDiagnosticsAfterReset(false);
       setGenerateError(error instanceof Error ? error.message : "Greška pri resetu izvlačenja.");
@@ -743,7 +777,166 @@ export default function CompetitionDrawPage() {
         </div>
       </Card>
 
-      {!isTournament ? <Card className="p-5 text-sm" style={{ color: "var(--text-secondary)" }}>League competitions do not use draw, groups, or knockout phases. Ranking is determined by league standings and points.</Card> : null}
+      {!isTournament ? (
+        <Card className="space-y-4 p-5">
+          <div>
+            <h3 className="text-lg font-semibold">Raspored lige</h3>
+            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+              Generiši ligaški raspored po kolima za izabranu sezonu i generaciju.
+            </p>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            {canManage ? (
+              <>
+                <Button
+                  variant="danger"
+                  onClick={() => void onResetSelectedGeneration()}
+                  disabled={resetDraw.isPending || !selectedGenerationYear}
+                >
+                  {resetDraw.isPending ? "Resetting..." : `Reset liga (${selectedGenerationYear ?? "-"})`}
+                </Button>
+                <Button variant="danger" onClick={() => void onResetAllDraw()} disabled={resetDraw.isPending}>
+                  {resetDraw.isPending ? "Resetting..." : "Reset liga (sve)"}
+                </Button>
+                <Button variant="danger" onClick={() => void onResetAllDrawAndSchedule()} disabled={resetDraw.isPending}>
+                  {resetDraw.isPending ? "Resetting..." : "Reset liga + satnica"}
+                </Button>
+                <Button
+                  variant={leagueIncludeWeekdays ? "primary" : "secondary"}
+                  onClick={() => setLeagueIncludeWeekdays((current) => !current)}
+                >
+                  {leagueIncludeWeekdays ? "Radni dani uključeni" : "Uključi radne dane"}
+                </Button>
+                {selectedGenerationYear ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => void onGenerateSelectedGeneration()}
+                    disabled={generateDraw.isPending}
+                  >
+                    {generateDraw.isPending ? "Generisanje..." : `Kreiraj ligu (${selectedGenerationYear})`}
+                  </Button>
+                ) : null}
+                <Button variant="primary" onClick={() => void onGenerate()} disabled={generateDraw.isPending}>
+                  {generateDraw.isPending ? "Generisanje..." : "Kreiraj ligu (sve generacije)"}
+                </Button>
+              </>
+            ) : (
+              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>Read-only access.</p>
+            )}
+          </div>
+          {generateError ? (
+            <div
+              className="rounded-lg border p-3 text-sm transition-opacity duration-300"
+              style={{ borderColor: "var(--danger)", color: "var(--danger)", opacity: generateErrorVisible ? 1 : 0 }}
+            >
+              {generateError}
+            </div>
+          ) : null}
+          {swapSuccess ? (
+            <div
+              className="rounded-lg border p-3 text-sm transition-opacity duration-300"
+              style={{ borderColor: "var(--primary)", color: "var(--primary)", opacity: swapSuccessVisible ? 1 : 0 }}
+            >
+              {swapSuccess}
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
+
+      {!isTournament ? (
+        <Card className="space-y-3 p-5">
+          <div>
+            <h3 className="text-lg font-semibold">Dani i satnica</h3>
+            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+              Definiši vremenski okvir u kojem sistem smije rezervisati termine pri ligaškom žrijebanju.
+            </p>
+          </div>
+          <div className="space-y-2">
+            {displayedScheduleDays.map((day, index) => (
+              <div key={`league-${index}-${day.dayDate}-${day.startTime}-${day.endTime}`} className="grid gap-2 md:grid-cols-[1fr_150px_150px_auto]">
+                <FormField label="Datum">
+                  <Input
+                    type="date"
+                    value={day.dayDate}
+                    onChange={(event) => {
+                      const next = [...displayedScheduleDays];
+                      next[index] = { ...next[index], dayDate: event.currentTarget.value, dayLabel: event.currentTarget.value };
+                      setScheduleDaysDraft(next);
+                    }}
+                  />
+                </FormField>
+                <FormField label="Vrijeme od">
+                  <Input
+                    type="time"
+                    value={day.startTime}
+                    onChange={(event) => {
+                      const next = [...displayedScheduleDays];
+                      next[index] = { ...next[index], startTime: event.currentTarget.value };
+                      setScheduleDaysDraft(next);
+                    }}
+                  />
+                </FormField>
+                <FormField label="Vrijeme do">
+                  <Input
+                    type="time"
+                    value={day.endTime}
+                    onChange={(event) => {
+                      const next = [...displayedScheduleDays];
+                      next[index] = { ...next[index], endTime: event.currentTarget.value };
+                      setScheduleDaysDraft(next);
+                    }}
+                  />
+                </FormField>
+                {displayedScheduleDays.length > 1 ? (
+                  <div className="flex items-end">
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        const next = displayedScheduleDays.filter((_, itemIndex) => itemIndex !== index);
+                        setScheduleDaysDraft(next);
+                      }}
+                    >
+                      -
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            ))}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                onClick={() =>
+                  setScheduleDaysDraft([
+                    ...displayedScheduleDays,
+                    {
+                      dayLabel: `Dan ${displayedScheduleDays.length + 1}`,
+                      dayDate: defaultTournamentDay,
+                      generationLabel: ALL_GENERATIONS_LABEL,
+                      stageScope: "ALL",
+                      pitchId: null,
+                      startTime: "09:00",
+                      endTime: "19:00",
+                    },
+                  ])
+                }
+              >
+                Dodaj satnicu
+              </Button>
+              <Button type="button" variant="primary" onClick={() => void onSaveScheduleDays()} disabled={updateCompetition.isPending}>
+                {updateCompetition.isPending ? "Čuvanje..." : "Sačuvaj dane i satnicu"}
+              </Button>
+            </div>
+            {scheduleSaved ? (
+              <div
+                className="rounded-lg border p-3 text-sm transition-opacity duration-300"
+                style={{ borderColor: "var(--primary)", color: "var(--primary)", opacity: scheduleSavedVisible ? 1 : 0 }}
+              >
+                {scheduleSaved}
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
 
       {isTournament ? (
         <div

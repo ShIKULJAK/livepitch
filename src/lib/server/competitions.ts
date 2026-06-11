@@ -247,7 +247,7 @@ function sanitizeCompetitionInput(input: CreateCompetitionInput) {
     generationMatchDurations: normalizedGenerationMatchDurations,
     stadiumName: input.type === "TOURNAMENT" ? (input.stadiumName?.trim() ?? null) : null,
     pitchNames: input.type === "TOURNAMENT" ? normalizedPitchNames : [],
-    scheduleDays: (input.type === "TOURNAMENT" ? input.scheduleDays ?? [] : []).map((day) => ({
+    scheduleDays: (input.type === "TOURNAMENT" || input.type === "LEAGUE" ? input.scheduleDays ?? [] : []).map((day) => ({
       dayLabel: day.dayLabel.trim(),
       dayDate: day.dayDate,
       generationLabel: day.generationLabel,
@@ -667,6 +667,72 @@ export async function getDashboardSnapshot(organizationId: string) {
     matchesToday,
     totalPlayers: playersCount,
     liveMatches,
+  };
+}
+
+export async function getStatisticsSnapshot(organizationId: string) {
+  const [matches, goalEventsCount, teamStatsAgg] = await Promise.all([
+    prisma.match.findMany({
+      where: {
+        competition: { organizationId },
+        homeScore: { not: null },
+        awayScore: { not: null },
+      },
+      select: {
+        id: true,
+        scheduledAt: true,
+        homeScore: true,
+        awayScore: true,
+      },
+      orderBy: { scheduledAt: "asc" },
+    }),
+    prisma.matchGoalEvent.count({
+      where: {
+        match: { competition: { organizationId } },
+      },
+    }),
+    prisma.matchTeamStats.aggregate({
+      where: {
+        match: { competition: { organizationId } },
+      },
+      _sum: {
+        yellowCards: true,
+        redCards: true,
+      },
+    }),
+  ]);
+
+  const totalGoals = matches.reduce((sum, match) => sum + (match.homeScore ?? 0) + (match.awayScore ?? 0), 0);
+  const scoredMatchesCount = matches.length;
+  const cleanSheets = matches.reduce((sum, match) => {
+    const homeScore = match.homeScore ?? 0;
+    const awayScore = match.awayScore ?? 0;
+    return sum + (homeScore === 0 || awayScore === 0 ? 1 : 0);
+  }, 0);
+
+  const homeWins = matches.filter((match) => (match.homeScore ?? 0) > (match.awayScore ?? 0)).length;
+  const draws = matches.filter((match) => (match.homeScore ?? 0) === (match.awayScore ?? 0)).length;
+  const awayWins = matches.filter((match) => (match.homeScore ?? 0) < (match.awayScore ?? 0)).length;
+
+  const goalsOverview = matches.slice(-10).map((match, index) => ({
+    label: `M${index + 1}`,
+    home: match.homeScore ?? 0,
+    away: match.awayScore ?? 0,
+  }));
+
+  return {
+    totalGoals,
+    goalsPerMatch: scoredMatchesCount ? totalGoals / scoredMatchesCount : 0,
+    goalEvents: goalEventsCount,
+    cleanSheets,
+    yellowCards: teamStatsAgg._sum.yellowCards ?? 0,
+    redCards: teamStatsAgg._sum.redCards ?? 0,
+    goalsOverview,
+    resultsBreakdown: [
+      { name: "Home Wins", value: homeWins },
+      { name: "Draws", value: draws },
+      { name: "Away Wins", value: awayWins },
+    ],
   };
 }
 
@@ -1514,21 +1580,24 @@ export async function listStandings(organizationId: string, competitionId?: stri
 
   const standingsCompetitions = competitions.map((competition) => {
     if (competition.type === CompetitionType.LEAGUE) {
-      const rows = computeTableRows({
+      const leagueMatches = competition.matches.map((match) => ({
+        homeTeamId: match.homeTeamId,
+        awayTeamId: match.awayTeamId,
+        homeScore: match.homeScore,
+        awayScore: match.awayScore,
+        scheduledAt: match.scheduledAt,
+      }));
+      const rows = leagueMatches.length
+        ? computeTableRows({
         teams: competition.teams.map((entry) => ({
           id: entry.team.id,
           name: entry.team.name,
           profileImageUrl: entry.team.profileImageUrl ?? null,
           seedPosition: entry.seed ?? null,
         })),
-        matches: competition.matches.map((match) => ({
-          homeTeamId: match.homeTeamId,
-          awayTeamId: match.awayTeamId,
-          homeScore: match.homeScore,
-          awayScore: match.awayScore,
-          scheduledAt: match.scheduledAt,
-        })),
-      });
+        matches: leagueMatches,
+      })
+        : [];
 
       return {
         competitionId: competition.id,
@@ -1571,7 +1640,9 @@ export async function listStandings(organizationId: string, competitionId?: stri
         ? draw.groups.map((group) => ({
             groupId: group.id,
             groupLabel: `Grupa ${group.name.toUpperCase()}`,
-            rows: computeTableRows({
+            rows:
+              competition.matches.some((match) => match.generationYear === draw.generationYear && match.drawGroupId === group.id)
+                ? computeTableRows({
               teams: group.teams.map((entry) => ({
                 id: entry.team.id,
                 name: entry.team.name,
@@ -1587,13 +1658,15 @@ export async function listStandings(organizationId: string, competitionId?: stri
                   awayScore: match.awayScore,
                   scheduledAt: match.scheduledAt,
                 })),
-            }),
+            })
+                : [],
           }))
         : [
             {
               groupId: `${draw.id}-overall`,
               groupLabel: "Ukupni poredak",
-              rows: computeTableRows({
+              rows: competition.matches.some((match) => match.generationYear === draw.generationYear && match.stage !== "GROUP_STAGE")
+                ? computeTableRows({
                 teams: generationTeams,
                 matches: competition.matches
                   .filter((match) => match.generationYear === draw.generationYear && match.stage !== "GROUP_STAGE")
@@ -1604,14 +1677,15 @@ export async function listStandings(organizationId: string, competitionId?: stri
                     awayScore: match.awayScore,
                     scheduledAt: match.scheduledAt,
                   })),
-              }),
+              })
+                : [],
             },
           ];
 
       return {
         generationYear: draw.generationYear ?? null,
         generationLabel: draw.generationYear ? `Generacija ${draw.generationYear}` : "Bez generacije",
-        groups,
+        groups: groups.filter((group) => group.rows.length > 0),
       };
     });
 
@@ -1626,7 +1700,8 @@ export async function listStandings(organizationId: string, competitionId?: stri
           {
             groupId: `${competition.id}-${generationYear}-overall`,
             groupLabel: "Ukupni poredak",
-            rows: computeTableRows({
+            rows: competition.matches.some((match) => match.generationYear === generationYear)
+              ? computeTableRows({
               teams: competition.teamGenerations
                 .filter((entry) => entry.generationYear === generationYear)
                 .map((entry) => ({
@@ -1643,7 +1718,8 @@ export async function listStandings(organizationId: string, competitionId?: stri
                   awayScore: match.awayScore,
                   scheduledAt: match.scheduledAt,
                 })),
-            }),
+            })
+              : [],
           },
         ],
       }));
@@ -1653,7 +1729,9 @@ export async function listStandings(organizationId: string, competitionId?: stri
       competitionName: competition.name,
       seasonLabel: competition.season?.name ?? null,
       competitionType: competition.type,
-      generations: [...drawGenerations, ...uncoveredGenerationYears].sort((a, b) => {
+      generations: [...drawGenerations, ...uncoveredGenerationYears]
+        .filter((generation) => generation.groups.some((group) => group.rows.length > 0))
+        .sort((a, b) => {
         const aYear = a.generationYear ?? -1;
         const bYear = b.generationYear ?? -1;
         return bYear - aYear;

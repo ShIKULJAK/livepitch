@@ -21,6 +21,10 @@ function allowedBirthYearsForGeneration(generationYear: number) {
   return [generationYear, generationYear + 1, generationYear + 2];
 }
 
+function normalizeTeamKey(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 export default function TeamApplicationFormPage() {
   const params = useParams<{ competitionId: string }>();
   const router = useRouter();
@@ -33,16 +37,42 @@ export default function TeamApplicationFormPage() {
   const applicationsQuery = useTeamApplications(params.competitionId);
   const seasonOptions = applicationsQuery.data?.seasonOptions ?? [];
   const [selectedCompetitionId, setSelectedCompetitionId] = useState<string>(params.competitionId);
+  const [teamId, setTeamId] = useState<string>("");
+  const [teamName, setTeamName] = useState("");
   const selectedCompetition =
     (competitionsQuery.data ?? []).find((item) => item.id === selectedCompetitionId) ?? competition;
+  const blockedTeamKeys = useMemo(
+    () =>
+      new Set(
+        (applicationsQuery.data?.applications ?? [])
+          .filter(
+            (application) =>
+              application.competitionId === selectedCompetitionId &&
+              application.status !== "REJECTED" &&
+              application.status !== "CANCELLED"
+          )
+          .map((application) => normalizeTeamKey(application.teamName))
+      ),
+    [applicationsQuery.data?.applications, selectedCompetitionId]
+  );
+  const availableTeams = useMemo(
+    () =>
+      (teamsQuery.data ?? []).filter((team) => {
+        if (selectedCompetition && team.sport !== selectedCompetition.sport) return false;
+        return !blockedTeamKeys.has(normalizeTeamKey(team.name));
+      }),
+    [blockedTeamKeys, selectedCompetition, teamsQuery.data]
+  );
+  const selectedTeam = useMemo(
+    () => availableTeams.find((team) => team.id === teamId) ?? null,
+    [availableTeams, teamId]
+  );
   const currentYear = new Date().getFullYear();
   const years = useMemo(
     () => Array.from({ length: 14 }, (_, index) => currentYear - 5 - index),
     [currentYear]
   );
 
-  const [teamId, setTeamId] = useState<string>("");
-  const [teamName, setTeamName] = useState("");
   const [generationYears, setGenerationYears] = useState<number[]>([]);
   const [playersByGeneration, setPlayersByGeneration] = useState<Record<number, PlayerRow[]>>({});
   const [coaches, setCoaches] = useState<CoachRow[]>([{ fullName: "", phone: "", email: "" }]);
@@ -77,6 +107,10 @@ export default function TeamApplicationFormPage() {
     setError(null);
     setSuccess(null);
     if (!selectedCompetition) return;
+    if (!selectedTeam) {
+      setError("Odaberite ekipu iz liste.");
+      return;
+    }
     if (generationYears.length === 0) {
       setError("Unesite generacije djece.");
       return;
@@ -85,8 +119,8 @@ export default function TeamApplicationFormPage() {
     try {
       await submit.mutateAsync({
         competitionId: selectedCompetition.id,
-        teamId: teamId || null,
-        teamName: teamName.trim(),
+        teamId: selectedTeam.id,
+        teamName: selectedTeam.name,
         generationYears,
         players: generationYears.flatMap((year) =>
           (playersByGeneration[year] ?? [])
@@ -126,6 +160,18 @@ export default function TeamApplicationFormPage() {
     });
   }
 
+  useEffect(() => {
+    if (!selectedTeam) return;
+    setTeamName(selectedTeam.name);
+  }, [selectedTeam]);
+
+  useEffect(() => {
+    if (!teamId) return;
+    if (selectedTeam) return;
+    setTeamId("");
+    setTeamName("");
+  }, [selectedTeam, teamId]);
+
   if (competitionsQuery.isLoading || competitionsQuery.isFetching) {
     return (
       <Card className="p-4 text-sm" style={{ color: "var(--text-secondary)" }}>
@@ -164,16 +210,6 @@ export default function TeamApplicationFormPage() {
           ) : null}
           <div className="grid gap-3 md:grid-cols-2">
             <FormField label="Ekipa" required>
-              <Input
-                value={teamName}
-                onChange={(event) => {
-                  const value = event.currentTarget.value;
-                  setTeamName(value);
-                }}
-                required
-              />
-            </FormField>
-            <FormField label="Poveži postojeći tim (opcionalno)">
               <Select
                 value={teamId}
                 onChange={(event) => {
@@ -195,14 +231,25 @@ export default function TeamApplicationFormPage() {
                         return next;
                       });
                     }
+                    return;
                   }
+                  setTeamName("");
                 }}
+                required
               >
-                <option value="">Ručno unesena ekipa</option>
-                {(teamsQuery.data ?? []).map((team) => (
+                <option value="">Izaberi ekipu</option>
+                {availableTeams.map((team) => (
                   <option key={team.id} value={team.id}>{team.name}</option>
                 ))}
               </Select>
+              {selectedCompetition && availableTeams.length === 0 ? (
+                <p className="mt-1 text-xs" style={{ color: "var(--text-secondary)" }}>
+                  Nema slobodnih ekipa za prijavu u izabranoj sezoni.
+                </p>
+              ) : null}
+            </FormField>
+            <FormField label="Naziv ekipe">
+              <Input value={teamName} readOnly disabled />
             </FormField>
           </div>
 

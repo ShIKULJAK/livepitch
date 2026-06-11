@@ -41,6 +41,7 @@ function toIsoDate(value?: string) {
 type StadiumBlock = { stadiumName: string; pitchNames: string[] };
 const STADIUM_PITCH_SEPARATOR = " - ";
 const ALL_GENERATIONS_LABEL = "Sve generacije";
+const APPLICATION_PENDING_COLOR = "#f59e0b";
 
 function parsePitchEntry(rawPitch: string, fallbackStadium: string) {
   const value = rawPitch.trim();
@@ -105,6 +106,61 @@ function encodeStadiumBlocks(blocks: StadiumBlock[]) {
     stadiumName: fallback,
     pitchNames: flattenedPitches.length ? flattenedPitches : [`${fallback}${STADIUM_PITCH_SEPARATOR}Teren 1`],
   };
+}
+
+function getApplicationStatusStyles(status: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED") {
+  switch (status) {
+    case "APPROVED":
+      return {
+        badge: {
+          borderColor: "color-mix(in srgb,var(--primary) 60%, transparent)",
+          backgroundColor: "color-mix(in srgb,var(--primary) 18%, transparent)",
+          color: "var(--primary)",
+        },
+        panel: {
+          border: "1px solid var(--primary)",
+          borderColor: "var(--primary)",
+          backgroundColor: "color-mix(in srgb,var(--primary) 10%, var(--surface-2))",
+        },
+      };
+    case "REJECTED":
+      return {
+        badge: {
+          borderColor: "color-mix(in srgb,var(--danger) 45%, transparent)",
+          backgroundColor: "color-mix(in srgb,var(--danger) 16%, transparent)",
+          color: "var(--danger)",
+        },
+        panel: {
+          borderColor: "color-mix(in srgb,var(--danger) 22%, var(--border))",
+          backgroundColor: "color-mix(in srgb,var(--danger) 5%, var(--surface-2))",
+        },
+      };
+    case "CANCELLED":
+      return {
+        badge: {
+          borderColor: "var(--border)",
+          backgroundColor: "var(--surface-2)",
+          color: "var(--text-secondary)",
+        },
+        panel: {
+          borderColor: "var(--border)",
+          backgroundColor: "var(--surface-2)",
+        },
+      };
+    case "PENDING":
+    default:
+      return {
+        badge: {
+          borderColor: APPLICATION_PENDING_COLOR,
+          backgroundColor: "color-mix(in srgb,#f59e0b 20%, transparent)",
+          color: APPLICATION_PENDING_COLOR,
+        },
+        panel: {
+          borderColor: APPLICATION_PENDING_COLOR,
+          backgroundColor: "color-mix(in srgb,#f59e0b 9%, var(--surface-2))",
+        },
+      };
+  }
 }
 
 export default function EditCompetitionPage() {
@@ -208,6 +264,18 @@ export default function EditCompetitionPage() {
   const seasonTeams = seasonSquadsQuery.data?.teams ?? [];
   const seasonApplications = (applicationsQuery.data?.applications ?? []).filter(
     (item) => item.competitionId === applicationsSeasonCompetitionId
+  );
+  const pendingSeasonApplications = useMemo(
+    () => seasonApplications.filter((item) => item.status === "PENDING"),
+    [seasonApplications]
+  );
+  const approvedSeasonApplications = useMemo(
+    () => seasonApplications.filter((item) => item.status === "APPROVED"),
+    [seasonApplications]
+  );
+  const rejectedSeasonApplications = useMemo(
+    () => seasonApplications.filter((item) => item.status === "REJECTED"),
+    [seasonApplications]
   );
   const activeSeasonTeamId = selectedSeasonTeamId ?? seasonTeams[0]?.teamId ?? null;
   const activeSeasonTeam = seasonTeams.find((team) => team.teamId === activeSeasonTeamId) ?? null;
@@ -321,6 +389,98 @@ export default function EditCompetitionPage() {
     const years = approvalDraft[applicationId] ?? fallbackYears;
     if (!years.length) return;
     await approveApplication.mutateAsync({ applicationId, approvedGenerationYears: years });
+  }
+
+function renderApplicationGenerations(
+    application: (typeof seasonApplications)[number],
+    mode: "interactive" | "readonly" | "approved"
+  ) {
+    const selectedYears =
+      approvalDraft[application.id] ??
+      application.generations
+        .filter((item) => item.isApproved ?? item.isRequested)
+        .map((item) => item.generationYear);
+
+    return (
+      <div className="mt-2 flex flex-wrap gap-2">
+        {application.generations.map((generation) => (
+          <button
+            key={`${application.id}-${generation.generationYear}`}
+            type="button"
+            className="rounded-lg border px-2 py-1 text-xs"
+            disabled={mode === "readonly" || mode === "approved"}
+            style={
+              selectedYears.includes(generation.generationYear)
+                ? mode === "approved"
+                  ? { borderColor: "var(--primary)", color: "var(--primary)", backgroundColor: "color-mix(in srgb,var(--primary) 10%, transparent)" }
+                  : { borderColor: APPLICATION_PENDING_COLOR, color: APPLICATION_PENDING_COLOR, backgroundColor: "color-mix(in srgb,#f59e0b 12%, transparent)" }
+                : mode === "approved"
+                  ? { borderColor: "color-mix(in srgb,var(--primary) 45%, transparent)", color: "var(--primary)" }
+                  : { borderColor: "var(--border)", color: "var(--text-secondary)" }
+            }
+            onClick={() => {
+              if (mode === "readonly" || mode === "approved") return;
+              toggleApprovalGeneration(application.id, generation.generationYear);
+            }}
+          >
+            {generation.generationYear}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function renderApplicationCard(
+    application: (typeof seasonApplications)[number],
+    mode: "pending" | "approved" | "rejected"
+  ) {
+    const statusStyles = getApplicationStatusStyles(application.status);
+    const teamNameColor = mode === "approved" ? { color: "var(--primary)" } : undefined;
+    const approvedCardStyle =
+      mode === "approved"
+        ? {
+            border: "1px solid var(--primary)",
+            boxShadow: "0 0 0 1px color-mix(in srgb,var(--primary) 35%, transparent) inset",
+          }
+        : null;
+    return (
+      <div key={application.id} className="rounded-xl border p-3" style={approvedCardStyle ? { ...statusStyles.panel, ...approvedCardStyle } : statusStyles.panel}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-medium" style={teamNameColor}>{application.teamName}</p>
+          <span className="rounded-full border px-2 py-0.5 text-[11px] font-medium" style={statusStyles.badge}>
+            {application.status}
+          </span>
+        </div>
+        <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+          {application.seasonLabel ?? "N/A"} • {formatDateStable(application.submittedAt)}
+        </p>
+        {renderApplicationGenerations(application, mode === "pending" ? "interactive" : mode === "approved" ? "approved" : "readonly")}
+        {mode === "pending" ? (
+          <div className="mt-2 flex justify-end">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="inline-flex h-8 items-center justify-center rounded-lg border px-3 text-xs font-medium transition-colors hover:bg-[color:var(--primary)] hover:!text-black disabled:pointer-events-none disabled:opacity-50"
+                style={{ borderColor: "var(--primary)", color: "var(--primary)" }}
+                disabled={approveApplication.isPending}
+                onClick={() => void approveApplicationByGenerations(application.id, application.generations.map((item) => item.generationYear))}
+              >
+                Odobri
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center justify-center rounded-lg border px-3 text-xs font-medium transition-colors hover:bg-[color:var(--danger)] hover:!text-white disabled:pointer-events-none disabled:opacity-50"
+                style={{ borderColor: "var(--danger)", color: "var(--danger)" }}
+                disabled={rejectApplication.isPending}
+                onClick={() => void rejectApplication.mutateAsync({ applicationId: application.id })}
+              >
+                Odbij
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
   }
 
   function setStadiumBlocks(next: StadiumBlock[]) {
@@ -896,64 +1056,94 @@ export default function EditCompetitionPage() {
             </Select>
           </FormField>
         </div>
-        <div className="space-y-2">
-          {seasonApplications.map((application) => {
-            const selectedYears = approvalDraft[application.id] ?? application.generations.filter((item) => item.isApproved ?? item.isRequested).map((item) => item.generationYear);
-            return (
-              <div key={application.id} className="rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-medium">{application.teamName}</p>
-                  <span className="text-xs" style={{ color: "var(--text-secondary)" }}>{application.status}</span>
-                </div>
-                <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                  {application.seasonLabel ?? "N/A"} • {formatDateStable(application.submittedAt)}
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {application.generations.map((generation) => (
-                    <button
-                      key={`${application.id}-${generation.generationYear}`}
-                      type="button"
-                      className="rounded-lg border px-2 py-1 text-xs"
-                      style={
-                        selectedYears.includes(generation.generationYear)
-                          ? { borderColor: "var(--primary)", color: "var(--primary)" }
-                          : { borderColor: "var(--border)", color: "var(--text-secondary)" }
-                      }
-                      onClick={() => toggleApprovalGeneration(application.id, generation.generationYear)}
-                    >
-                      {generation.generationYear}
-                    </button>
-                  ))}
-                </div>
-                <div className="mt-2 flex justify-end">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="primary"
-                      disabled={approveApplication.isPending}
-                      onClick={() => void approveApplicationByGenerations(application.id, application.generations.map((item) => item.generationYear))}
-                    >
-                      Odobri učešće
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="danger"
-                      disabled={rejectApplication.isPending}
-                      onClick={() => void rejectApplication.mutateAsync({ applicationId: application.id })}
-                    >
-                      Odbij ekipu
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          {seasonApplications.length === 0 ? (
-            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              Nema prijava za izabranu sezonu.
-            </p>
-          ) : null}
+        <div className="grid gap-4 xl:grid-cols-3">
+          <div
+            className="space-y-2 rounded-xl border p-3"
+            style={{
+              borderColor: APPLICATION_PENDING_COLOR,
+              backgroundColor: "color-mix(in srgb,#f59e0b 7%, var(--surface-1))",
+              boxShadow: "0 0 0 1px color-mix(in srgb,#f59e0b 35%, transparent) inset",
+            }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="font-medium">Pending prijave</h4>
+              <span
+                className="rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                style={{
+                  borderColor: APPLICATION_PENDING_COLOR,
+                  backgroundColor: "color-mix(in srgb,#f59e0b 20%, transparent)",
+                  color: APPLICATION_PENDING_COLOR,
+                }}
+              >
+                {pendingSeasonApplications.length}
+              </span>
+            </div>
+            {pendingSeasonApplications.length ? pendingSeasonApplications.map((application) => renderApplicationCard(application, "pending")) : (
+              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                Nema ekipa koje čekaju odobrenje.
+              </p>
+            )}
+          </div>
+          <div
+            className="space-y-2 rounded-xl border p-3"
+            style={{
+              border: "1px solid var(--primary)",
+              borderColor: "var(--primary)",
+              backgroundColor: "color-mix(in srgb,var(--primary) 7%, var(--surface-1))",
+              boxShadow: "0 0 0 1px color-mix(in srgb,var(--primary) 45%, transparent) inset",
+            }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="font-medium" style={{ color: "var(--primary)" }}>Učesnici takmičenja</h4>
+              <span
+                className="rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                style={{
+                  borderColor: "color-mix(in srgb,var(--primary) 60%, transparent)",
+                  backgroundColor: "color-mix(in srgb,var(--primary) 18%, transparent)",
+                  color: "var(--primary)",
+                }}
+              >
+                {approvedSeasonApplications.length}
+              </span>
+            </div>
+            {approvedSeasonApplications.length ? approvedSeasonApplications.map((application) => renderApplicationCard(application, "approved")) : (
+              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                Nema odobrenih ekipa za izabranu sezonu.
+              </p>
+            )}
+          </div>
+          <div
+            className="space-y-2 rounded-xl border p-3"
+            style={{
+              borderColor: "color-mix(in srgb,var(--danger) 22%, var(--border))",
+              backgroundColor: "color-mix(in srgb,var(--danger) 4%, var(--surface-1))",
+            }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="font-medium">Odbijene ekipe</h4>
+              <span
+                className="rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                style={{
+                  borderColor: "color-mix(in srgb,var(--danger) 45%, transparent)",
+                  backgroundColor: "color-mix(in srgb,var(--danger) 16%, transparent)",
+                  color: "var(--danger)",
+                }}
+              >
+                {rejectedSeasonApplications.length}
+              </span>
+            </div>
+            {rejectedSeasonApplications.length ? rejectedSeasonApplications.map((application) => renderApplicationCard(application, "rejected")) : (
+              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                Nema odbijenih ekipa za izabranu sezonu.
+              </p>
+            )}
+          </div>
         </div>
+        {seasonApplications.length === 0 ? (
+          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+            Nema prijava za izabranu sezonu.
+          </p>
+        ) : null}
       </Card>
       <Card className="space-y-3 p-6">
         <h3 className="text-lg font-semibold">Učesnici po generacijama</h3>

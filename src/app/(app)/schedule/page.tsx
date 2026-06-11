@@ -69,12 +69,17 @@ export default function SchedulePage() {
             .map((match) => [`${match.competitionId}::${match.generationYear}`, { competitionId: match.competitionId, generationYear: match.generationYear as number }])
         ).values()
       ),
-    [matches]
+    [matchesQuery.data]
+  );
+
+  const generationTargetsKey = useMemo(
+    () => generationTargets.map((target) => `${target.competitionId}::${target.generationYear}`).join("|"),
+    [generationTargets]
   );
 
   useEffect(() => {
     if (!generationTargets.length) {
-      setGroupsByGeneration({});
+      setGroupsByGeneration((current) => (Object.keys(current).length ? {} : current));
       return;
     }
 
@@ -101,13 +106,21 @@ export default function SchedulePage() {
       );
 
       if (cancelled) return;
-      setGroupsByGeneration(Object.fromEntries(entries));
+      const nextGroups = Object.fromEntries(entries);
+      setGroupsByGeneration((current) => {
+        const currentKeys = Object.keys(current);
+        const nextKeys = Object.keys(nextGroups);
+        if (currentKeys.length === nextKeys.length && currentKeys.every((key) => current[key] === nextGroups[key])) {
+          return current;
+        }
+        return nextGroups;
+      });
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [generationTargets]);
+  }, [generationTargets, generationTargetsKey]);
 
   const groupedSchedule = useMemo(() => {
     const byCompetitionName = new Map<

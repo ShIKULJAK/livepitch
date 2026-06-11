@@ -27,7 +27,7 @@ export default function TeamApplicationsEntryPage() {
       <PageHeader title="Prijavi ekipu" description="Odaberite takmičenje i pošaljite prijavu ekipe po generacijama." />
       <FilterBar>
         <Input
-          placeholder="Pronađi turnir"
+          placeholder="Pronađi takmičenje"
           className="max-w-sm"
           value={query}
           onChange={(event) => setQuery(event.currentTarget.value)}

@@ -17,11 +17,11 @@ export function LinePerformanceChart({ data }: { data: Point[] }) {
   );
 
   if (!isClient) {
-    return <div className="h-64 w-full animate-pulse rounded-xl" style={{ backgroundColor: "var(--surface-2)" }} aria-hidden />;
+    return <div className="h-64 min-w-0 w-full animate-pulse rounded-xl" style={{ backgroundColor: "var(--surface-2)" }} aria-hidden />;
   }
 
   return (
-    <div className="h-64 w-full">
+    <div className="h-64 min-w-0 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data}>
           <XAxis dataKey="label" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />

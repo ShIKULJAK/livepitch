@@ -11,8 +11,17 @@ export async function listApplicableCompetitions(
   const competitions = await prisma.competition.findMany({
     where: {
       organizationId,
-      status: { in: [CompetitionStatus.DRAFT, CompetitionStatus.UPCOMING] },
-      OR: [{ endDate: null }, { endDate: { gte: now } }],
+      AND: [
+        {
+          OR: [
+            { status: { in: [CompetitionStatus.DRAFT, CompetitionStatus.UPCOMING] } },
+            { type: "LEAGUE", status: CompetitionStatus.ONGOING },
+          ],
+        },
+        {
+          OR: [{ endDate: null }, { endDate: { gte: now } }],
+        },
+      ],
       ...(filters.q
         ? {
             OR: [
@@ -81,11 +90,17 @@ export async function submitTeamApplication(
 ) {
   const competition = await prisma.competition.findFirst({
     where: { id: input.competitionId, organizationId },
-    select: { id: true, seasonId: true, sport: true, status: true },
+    select: { id: true, seasonId: true, sport: true, status: true, type: true, endDate: true },
   });
   if (!competition) throw new Error("Competition not found.");
-  if (competition.status !== CompetitionStatus.DRAFT && competition.status !== CompetitionStatus.UPCOMING) {
-    throw new Error("Prijava je dozvoljena samo za turnire u pripremnoj ili nadolazećoj fazi.");
+  const canAcceptApplication =
+    competition.status === CompetitionStatus.DRAFT ||
+    competition.status === CompetitionStatus.UPCOMING ||
+    (competition.type === "LEAGUE" &&
+      competition.status === CompetitionStatus.ONGOING &&
+      (!competition.endDate || competition.endDate >= new Date()));
+  if (!canAcceptApplication) {
+    throw new Error("Prijava je dozvoljena samo za aktivna takmičenja koja još primaju prijave.");
   }
 
   const uniqueYears = Array.from(new Set(input.generationYears)).sort((a, b) => b - a);

@@ -60,6 +60,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ com
         return NextResponse.json({ error: "Competition not found" }, { status: 404 });
       }
 
+      if (existing.competition.type === "LEAGUE" && !(existing.competition.availableGenerationYears ?? []).length) {
+        const data = await generateDraw(currentUser.organizationId, { id: currentUser.id, role: currentUser.role }, competitionId, parsed.data);
+        return NextResponse.json({ data }, { status: 201 });
+      }
+
       const generated: number[] = [];
       const deficits: Array<{ year: number; participants: number; missing: number }> = [];
       const skipped: Array<{ year: number; reason: string }> = [];
@@ -96,11 +101,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ com
                 .map((item) => `Generacija ${item.year}: prijavljeno ${item.participants}, fali ${item.missing}`)
                 .join(" | ")
             : skipped.length > 0
-              ? "Generacije postoje, ali nema dostupnih terena/termina za automatsko izvlačenje."
+              ? "Generacije postoje, ali nema dostupnih terena/termina za automatsko generisanje."
               : "Nema odobrenih generacija sa učesnicima.";
         return NextResponse.json(
           {
-            error: `Nema dovoljno ekipa za automatsko izvlačenje. ${byGeneration}${skipped.length ? ` | Preskočeno: ${skipped.map((item) => `Generacija ${item.year} (${item.reason})`).join(" ; ")}` : ""}`,
+            error: `Nema dovoljno ekipa za automatsko generisanje. ${byGeneration}${skipped.length ? ` | Preskočeno: ${skipped.map((item) => `Generacija ${item.year} (${item.reason})`).join(" ; ")}` : ""}`,
             details: deficits,
             skipped,
           },

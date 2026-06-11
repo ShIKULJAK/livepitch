@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { CompetitionStatus, CompetitionType } from "@prisma/client";
 import { FavoriteTargetType } from "@prisma/client";
 import { useCompetitionSeasons, useDeleteCompetition, useCompetitions } from "@/hooks/use-competitions";
@@ -52,16 +52,6 @@ export default function TournamentsPage() {
   const [type, setType] = useState<CompetitionType | "ALL">("ALL");
   const [status, setStatus] = useState<CompetitionStatus | "ALL">("ALL");
   const seasonsQuery = useCompetitionSeasons();
-  const didApplyDefaultSeason = useRef(false);
-
-  useEffect(() => {
-    if (!seasonsQuery.data) return;
-    if (didApplyDefaultSeason.current) return;
-    const currentYear = String(new Date().getFullYear());
-    const hasCurrentYear = seasonsQuery.data.years.some((entry) => entry.year === currentYear);
-    if (hasCurrentYear) setSeasonYear(currentYear);
-    didApplyDefaultSeason.current = true;
-  }, [seasonsQuery.data]);
 
   const filters = useMemo(
     () => ({ q: query || undefined, type, status, season: seasonYear !== "ALL" ? seasonYear : undefined }),
